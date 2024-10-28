@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Widget Customization</title>
+	
+	
+	<!-- Server CSS files with media="none" to prevent them from loading -->
+<link rel="stylesheet" href="https://myservicecloud.net/js-widgets/main/get-colors-style?apiKey=6edd8c98-5c17-4521-b292-f69e7766907b&amp;widgetType=comm-pricing" type="text/css" media="none">
+<link rel="stylesheet" href="https://myservicecloud.net/js-widgets/main/js-widget_color.css" type="text/css" media="none">
+<link rel="stylesheet" href="https://myservicecloud.net/js/widgets/comm-pricing/build/css/app.9b6fe025.css" type="text/css" media="none">
+<link rel="stylesheet" href="https://myservicecloud.net/js/widgets/comm-pricing/build/css/chunk-vendors.3b8d259f.css" type="text/css" media="none">
+<link rel="stylesheet" type="text/css" href="https://myservicecloud.net/js/widgets/comm-pricing/build/css/chunk-50dd5bb8.4da9c9e2.css" media="none">
+<link rel="stylesheet" type="text/css" href="https://myservicecloud.net/js/widgets/comm-pricing/build/css/chunk-9dc5971e.161f7826.css" media="none">
+<link rel="stylesheet" type="text/css" href="https://myservicecloud.net/js/widgets/comm-pricing/build/css/customer-form/step-account~customer-form/step-customer-info.4f4819c7.css" media="none">
+<link rel="stylesheet" type="text/css" href="https://myservicecloud.net/js/widgets/comm-pricing/build/css/customer-form/step-account.1eafe48a.css" media="none">
+<link rel="stylesheet" type="text/css" href="https://myservicecloud.net/js/widgets/comm-pricing/build/css/customer-form/step-customer-info.02f845ac.css" media="none">
+
+<!-- Your custom CSS file (loads normally) -->
+<link rel="stylesheet" href="css/js-widget_color.css" type="text/css">
+<link rel="stylesheet" href="css/app.9b6fe025.css" type="text/css">
+<link rel="stylesheet" href="css/chunk-vendors.3b8d259f.css" type="text/css">
+<link rel="stylesheet" href="css/chunk-50dd5bb8.4da9c9e2.css" type="text/css">
+<link rel="stylesheet" href="css/chunk-9dc5971e.161f7826.css" type="text/css">
+<link rel="stylesheet" href="css/step-customer-info.4f4819c7.css" type="text/css">
+<link rel="stylesheet" href="css/step-account.1eafe48a.css" type="text/css">
+<link rel="stylesheet" href="css/step-customer-info.02f845ac.css" type="text/css">
+
+
+	
+</head>
+
+
+
+<body>
+
+
+
+    <script id="app" data-api-key="6edd8c98-5c17-4521-b292-f69e7766907b" data-widget-type="comm-pricing" src="embed_comm_pricing.js"></script>
+
+
+	
+	
+	
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // Select all <link> elements with rel="stylesheet"
+            const links = document.querySelectorAll("link[rel='stylesheet']");
+
+            links.forEach(link => {
+                try {
+                    // Check if the link's href contains "myservicecloud.net"
+                    if (link.href.includes("myservicecloud.net")) {
+                        link.disabled = true; // Disable the server’s CSS
+                        console.log(`Disabled CSS from: ${link.href}`);
+                    }
+                } catch (error) {
+                    console.error(`Error disabling CSS from ${link.href}:`, error);
+                }
+            });
+        });
+    </script>
+
+
+
+
+
+
+</body>
+
+
+
+</html>
