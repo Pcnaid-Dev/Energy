@@ -198,15 +198,14 @@ jobs:
           echo '::error::No visual baselines exist. Run workflow_dispatch with update_baselines=true, download the baselines artifact, inspect every image, and commit them in a PR. candidate baselines were uploaded as the `baselines` artifact for review'
           exit 1
 
-  vision-gpt:
-    name: GPT vision audit
+  vision-grok:
+    name: Grok vision audit
     needs: visual
     if: ${{ always() && needs.visual.outputs.has-screenshots == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: read
-      models: read
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -217,23 +216,25 @@ jobs:
           name: visual-out
           path: visual-out
 
-      - name: Audit every image with GPT-4.1
-        id: gpt-audit
+      - name: Audit every image with grok-4.6
+        id: grok-audit
         continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 .github/scripts/vision-gpt.py
+          AZURE_VISION_ENDPOINT: ${{ secrets.AZURE_VISION_ENDPOINT }}
+          AZURE_VISION_KEY: ${{ secrets.AZURE_VISION_KEY }}
+          AZURE_VISION_MODEL: ${{ secrets.AZURE_VISION_MODEL }}
+        run: python3 .github/scripts/vision-grok.py
 
-      - name: Upload GPT audit
+      - name: Upload Grok audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: vision-gpt
-          path: vision-gpt.json
+          name: vision-grok
+          path: vision-grok.json
           if-no-files-found: warn
 
-      - name: Enforce GPT audit
-        if: ${{ always() && steps.gpt-audit.outcome != 'success' }}
+      - name: Enforce Grok audit
+        if: ${{ always() && steps.grok-audit.outcome != 'success' }}
         run: exit 1
 
   vision-claude:
@@ -267,10 +268,11 @@ jobs:
             Read ui-states.json and every PNG under visual-out/ using Glob and Read. Do not skip an image.
             For every visible button, link, CTA, and input in each image, check all of the following:
             - legible: text contrast is adequate by eye
-            - centred: the label is visually centred in its control
-            - matches_sibling: controls named as pairs in ui-states.json use the same text colour, font family, font size, and alignment
+            - centred: the label plus its icon, if any, are visually centred as a group; an arrow or icon beside text is not by itself off-centre
+            - matches_sibling: controls named as pairs in ui-states.json use the same text colour, font family (serif vs sans), font weight, and alignment
             - no_overflow: no text overflows or is clipped
             - no_raw_markdown: no raw Markdown or code fences are visible
+            A size difference between a header button and a full-width drawer button is expected and is not a failure.
             Treat every failed check as a MUST finding. Use only facts visible in the screenshots.
             Write vision-claude.json and no other file. It must be valid JSON, with no Markdown fences, in this exact root schema:
             {"model":"claude","results":[{"image":"basename.png","route":"/route","viewport":"mobile|desktop","state":"state-name","pairs":[],"controls":[{"name":"visible control name","checks":{"legible":true,"centred":true,"matches_sibling":true,"no_overflow":true,"no_raw_markdown":true},"verdict":"PASS|FAIL","reason":"concise visual evidence"}],"verdict":"PASS|FAIL"}],"must":[{"image":"basename.png","control":"control name","reason":"finding"}],"verdict":"PASS|FAIL"}
@@ -299,7 +301,7 @@ jobs:
     name: Deploy production
     needs:
       - visual
-      - vision-gpt
+      - vision-grok
       - vision-claude
     if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest

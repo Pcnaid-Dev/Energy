@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
-"""Run one GitHub Models vision audit for every visual-gate PNG."""
+"""Run one Azure AI Foundry Grok vision audit for every visual-gate PNG."""
 
 from __future__ import annotations
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
+import re
+import socket
 import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-ENDPOINT = "https://models.github.ai/inference/chat/completions"
-MODEL = "openai/gpt-4.1"
+MAX_WORKERS = 4
+MAX_RETRIES = 3
+REQUEST_TIMEOUT_SECONDS = 300
 CHECK_NAMES = (
     "legible",
     "centred",
@@ -52,10 +56,11 @@ def build_prompt(image_name: str, metadata: dict[str, Any]) -> str:
             json.dumps(metadata["pairs"], separators=(",", ":")),
             "For every visible button, link, CTA, and input, report whether:",
             "1. legible: its text has adequate contrast by eye;",
-            "2. centred: its label is visually centred in its control;",
-            "3. matches_sibling: it matches any named sibling in text colour, font family, font size, and alignment;",
+            "2. centred: its label plus any accompanying icon are visually centred as one group; an arrow or icon beside text is not by itself off-centre;",
+            "3. matches_sibling: it matches any named sibling in text colour, font family (serif vs sans), font weight, and alignment;",
             "4. no_overflow: no text is overflowing or clipped;",
             "5. no_raw_markdown: it shows no raw Markdown or code fences.",
+            "A size difference between a header button and a full-width drawer button is expected and is not a failure.",
             "If a sibling is not visible, set matches_sibling true only when there is no visible mismatch to assess and explain that limitation.",
             "Return only one JSON object with exactly this shape:",
             '{"controls":[{"name":"visible control name","checks":{"legible":true,"centred":true,"matches_sibling":true,"no_overflow":true,"no_raw_markdown":true},"verdict":"PASS","reason":"concise visual evidence"}],"verdict":"PASS"}',
@@ -64,10 +69,40 @@ def build_prompt(image_name: str, metadata: dict[str, Any]) -> str:
     )
 
 
-def request_audit(token: str, image_path: Path, metadata: dict[str, Any]) -> dict[str, Any]:
+def extract_first_json_object(content: str) -> dict[str, Any]:
+    text = re.sub(r"^\s*```(?:json)?\s*", "", content, count=1, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```\s*$", "", text, count=1)
+    decoder = json.JSONDecoder()
+    for start, character in enumerate(text):
+        if character != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+    raise ValueError("model response content does not contain a JSON object")
+
+
+def retry_delay(retry: int, retry_after: str | None = None) -> float:
+    try:
+        delay = float(retry_after) if retry_after else 2**retry
+    except ValueError:
+        delay = 2**retry
+    return min(max(delay, 1), 30)
+
+
+def request_audit(
+    endpoint: str,
+    api_key: str,
+    model: str,
+    image_path: Path,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
     encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
     payload = {
-        "model": MODEL,
+        "model": model,
         "messages": [
             {
                 "role": "system",
@@ -88,43 +123,59 @@ def request_audit(token: str, image_path: Path, metadata: dict[str, Any]) -> dic
             },
         ],
         "temperature": 0,
-        "response_format": {"type": "json_object"},
     }
     request = Request(
-        ENDPOINT,
+        endpoint,
         data=json.dumps(payload).encode("utf-8"),
         method="POST",
         headers={
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "api-key": api_key,
             "Content-Type": "application/json",
-            "X-GitHub-Api-Version": "2022-11-28",
         },
     )
 
-    for retry in range(4):
+    for retry in range(MAX_RETRIES + 1):
         try:
-            with urlopen(request, timeout=120) as response:
-                response_body = json.loads(response.read().decode("utf-8"))
+            with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                raw_body = response.read()
+            try:
+                response_body = json.loads(raw_body)
+            except (json.JSONDecodeError, UnicodeDecodeError) as error:
+                preview = raw_body[:200].decode("utf-8", errors="replace")
+                raise ValueError(f"response is not JSON: {preview}") from error
             content = response_body["choices"][0]["message"]["content"]
             if not isinstance(content, str):
                 raise ValueError("model response content is not a JSON string")
-            return json.loads(content)
+            return extract_first_json_object(content)
         except HTTPError as error:
-            if error.code == 429 and retry < 3:
-                retry_after = error.headers.get("Retry-After")
-                try:
-                    delay = float(retry_after) if retry_after else 2**retry
-                except ValueError:
-                    delay = 2**retry
-                time.sleep(min(max(delay, 1), 30))
-                continue
             detail = error.read().decode("utf-8", errors="replace")[:500]
+            retryable = error.code == 429 or 500 <= error.code < 600
+            if retryable and retry < MAX_RETRIES:
+                time.sleep(retry_delay(retry, error.headers.get("Retry-After")))
+                continue
             raise RuntimeError(f"HTTP {error.code}: {detail}") from error
+        except (TimeoutError, socket.timeout) as error:
+            if retry < MAX_RETRIES:
+                time.sleep(retry_delay(retry))
+                continue
+            raise RuntimeError(
+                f"request timed out after {MAX_RETRIES + 1} attempts: {error}"
+            ) from error
         except URLError as error:
+            timed_out = isinstance(error.reason, (TimeoutError, socket.timeout)) or (
+                "timed out" in str(error.reason).lower()
+            )
+            if timed_out and retry < MAX_RETRIES:
+                time.sleep(retry_delay(retry))
+                continue
+            if timed_out:
+                raise RuntimeError(
+                    f"request timed out after {MAX_RETRIES + 1} attempts: {error.reason}"
+                ) from error
             raise RuntimeError(f"network error: {error.reason}") from error
 
-    raise RuntimeError("GitHub Models returned HTTP 429 after three retries")
+    raise RuntimeError("Azure AI Foundry request failed after three retries")
 
 
 def normalize_audit(raw: Any) -> dict[str, Any]:
@@ -179,6 +230,47 @@ def normalize_audit(raw: Any) -> dict[str, Any]:
     }
 
 
+def audit_image(
+    endpoint: str,
+    api_key: str,
+    model: str,
+    image_path: Path,
+    metadata_by_image: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    metadata = metadata_by_image.get(
+        image_path.name,
+        {"route": "unknown", "viewport": "unknown", "state": "unknown", "pairs": []},
+    )
+    try:
+        missing_variables = [
+            name
+            for name, value in (
+                ("AZURE_VISION_ENDPOINT", endpoint),
+                ("AZURE_VISION_KEY", api_key),
+                ("AZURE_VISION_MODEL", model),
+            )
+            if not value
+        ]
+        if missing_variables:
+            raise RuntimeError(f"{', '.join(missing_variables)} required")
+        normalized = normalize_audit(
+            request_audit(endpoint, api_key, model, image_path, metadata)
+        )
+        result = {"image": image_path.name, **metadata, **normalized}
+        if image_path.name not in metadata_by_image:
+            result["verdict"] = "FAIL"
+            result["error"] = "Screenshot has no matching ui-states.json entry."
+    except Exception as error:  # Every request error must be recorded and fail the gate.
+        result = {
+            "image": image_path.name,
+            **metadata,
+            "controls": [],
+            "verdict": "FAIL",
+            "error": str(error),
+        }
+    return result
+
+
 def table_reason(result: dict[str, Any]) -> str:
     if result.get("error"):
         return str(result["error"])
@@ -194,7 +286,7 @@ def markdown_cell(value: Any) -> str:
 
 def write_summary(results: list[dict[str, Any]], verdict: str) -> None:
     lines = [
-        "## GPT visual audit",
+        "## Grok visual audit",
         "",
         "| Image | Controls | Verdict | Result |",
         "| --- | ---: | :---: | --- |",
@@ -218,7 +310,9 @@ def write_summary(results: list[dict[str, Any]], verdict: str) -> None:
 
 
 def main() -> int:
-    token = os.environ.get("GITHUB_TOKEN")
+    endpoint = os.environ.get("AZURE_VISION_ENDPOINT", "").strip()
+    api_key = os.environ.get("AZURE_VISION_KEY", "").strip()
+    model = os.environ.get("AZURE_VISION_MODEL", "").strip()
     metadata_by_image = load_state_metadata(Path("ui-states.json"))
     images = sorted(Path("visual-out").rglob("*.png"))
     actual_names = {image.name for image in images}
@@ -239,28 +333,23 @@ def main() -> int:
         )
         must.append({"image": missing_name, "control": "capture", "reason": reason})
 
-    for image_path in images:
-        metadata = metadata_by_image.get(image_path.name)
-        if metadata is None:
-            metadata = {"route": "unknown", "viewport": "unknown", "state": "unknown", "pairs": []}
-        try:
-            if not token:
-                raise RuntimeError("GITHUB_TOKEN is required")
-            normalized = normalize_audit(request_audit(token, image_path, metadata))
-            result = {"image": image_path.name, **metadata, **normalized}
-            if image_path.name not in metadata_by_image:
-                result["verdict"] = "FAIL"
-                result["error"] = "Screenshot has no matching ui-states.json entry."
-        except Exception as error:  # Every request error must be recorded and fail the gate.
-            result = {
-                "image": image_path.name,
-                **metadata,
-                "controls": [],
-                "verdict": "FAIL",
-                "error": str(error),
-            }
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = [
+            executor.submit(
+                audit_image,
+                endpoint,
+                api_key,
+                model,
+                image_path,
+                metadata_by_image,
+            )
+            for image_path in images
+        ]
+        audited_results = [future.result() for future in futures]
+
+    for result in audited_results:
         results.append(result)
-        print(f"{image_path.name}: {result['verdict']}")
+        print(f"{result['image']}: {result['verdict']}")
 
         if result["verdict"] == "FAIL":
             failed_controls = [
@@ -270,7 +359,7 @@ def main() -> int:
                 for control in failed_controls:
                     must.append(
                         {
-                            "image": image_path.name,
+                            "image": result["image"],
                             "control": control["name"],
                             "reason": control["reason"],
                         }
@@ -278,7 +367,7 @@ def main() -> int:
             else:
                 must.append(
                     {
-                        "image": image_path.name,
+                        "image": result["image"],
                         "control": "audit",
                         "reason": result.get("error", "Image verdict was FAIL."),
                     }
@@ -302,8 +391,8 @@ def main() -> int:
         must.append({"image": "(none)", "control": "capture", "reason": reason})
 
     verdict = "FAIL" if must or any(result["verdict"] == "FAIL" for result in results) else "PASS"
-    output = {"model": MODEL, "results": results, "must": must, "verdict": verdict}
-    Path("vision-gpt.json").write_text(
+    output = {"model": model, "results": results, "must": must, "verdict": verdict}
+    Path("vision-grok.json").write_text(
         json.dumps(output, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
