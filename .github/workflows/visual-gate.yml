@@ -240,7 +240,7 @@ jobs:
   vision-claude:
     name: Claude vision audit
     needs: visual
-    if: ${{ always() && needs.visual.outputs.has-screenshots == 'true' }}
+    if: ${{ always() && needs.visual.outputs.has-screenshots == 'true' && github.event_name != 'push' }}
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -313,7 +313,7 @@ jobs:
       - visual
       - vision-grok
       - vision-claude
-    if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.visual.result == 'success' && needs.vision-grok.result == 'success' && (needs.vision-claude.result == 'success' || needs.vision-claude.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: production
     permissions:
