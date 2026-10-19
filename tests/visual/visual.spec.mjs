@@ -157,9 +157,19 @@ async function performAction(page, action) {
     case 'hover':
       await locator.hover();
       break;
-    case 'focus':
-      await locator.focus();
+    case 'focus': {
+      let reached = false;
+      for (let i = 0; i < 60; i++) {
+        await page.keyboard.press('Tab');
+        reached = await locator.evaluate((el) => el === document.activeElement);
+        if (reached) break;
+      }
+      if (!reached) {
+        throw new Error('keyboard focus never reached ' + action.selector);
+      }
+      expect(await locator.evaluate((el) => el.matches(':focus-visible'))).toBe(true);
       break;
+    }
     case 'fill':
       await locator.fill(action.value ?? '');
       break;
