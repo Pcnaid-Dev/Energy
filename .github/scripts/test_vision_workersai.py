@@ -284,10 +284,12 @@ class WorkersAINormalizationTests(unittest.TestCase):
             "reason": "drawer is closed",
         }
         metadata = {
-            "route": "/",
-            "viewport": "desktop",
-            "state": "default",
-            "pairs": [DECLARED_PAIR],
+            "state.png": {
+                "route": "/",
+                "viewport": "desktop",
+                "state": "default",
+                "pairs": [DECLARED_PAIR],
+            }
         }
         with mock.patch.object(
             vision_workersai,

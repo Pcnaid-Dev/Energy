@@ -273,7 +273,7 @@ export async function compareDeclaredPairs(page, pairs) {
       const firstValue = comparedValue(controls[0], valueKey);
       const secondValue = comparedValue(controls[1], valueKey);
       const matches = property === 'horizontal-centring'
-        ? controls[0].values.horizontalCentring.centred === controls[1].values.horizontalCentring.centred
+        ? controls[0].values.horizontalCentring.centred === true && controls[1].values.horizontalCentring.centred === true
         : firstValue === secondValue;
       return {
         property,
