@@ -26,14 +26,27 @@ REQUEST_TIMEOUT_SECONDS = 300
 CHECK_NAMES = (
     "legible",
     "centred",
-    "matches_sibling",
     "no_overflow",
     "no_raw_markdown",
 )
+PAIR_CHECK_NAMES = (
+    "text_colour",
+    "font_family",
+    "font_weight",
+    "alignment",
+)
 
 
-class EmptyAuditResponse(ValueError):
+class AuditResponseError(ValueError):
+    """A model answer that can be retried because it is not usable."""
+
+
+class EmptyAuditResponse(AuditResponseError):
     """A model response that can be retried because it contains no controls."""
+
+
+class InvalidAuditResponse(AuditResponseError):
+    """A model response that can be retried because its schema is invalid."""
 
 
 def load_state_metadata(config_path: Path) -> dict[str, dict[str, Any]]:
@@ -53,6 +66,13 @@ def load_state_metadata(config_path: Path) -> dict[str, dict[str, Any]]:
 
 
 def build_prompt(image_name: str, metadata: dict[str, Any]) -> str:
+    declared_pairs = [
+        {
+            "name": pair["name"],
+            "controls": [control["name"] for control in pair["controls"]],
+        }
+        for pair in metadata["pairs"]
+    ]
     return "\n".join(
         (
             "Audit this UI screenshot control by control.",
@@ -60,19 +80,22 @@ def build_prompt(image_name: str, metadata: dict[str, Any]) -> str:
             f"Route: {metadata['route']}",
             f"Viewport: {metadata['viewport']}",
             f"State: {metadata['state']}",
-            "Sibling-control pairs from ui-states.json:",
-            json.dumps(metadata["pairs"], separators=(",", ":")),
+            "Declared sibling-control pairs from ui-states.json (pair name and control names):",
+            json.dumps(declared_pairs, separators=(",", ":")),
             "For every visible button, link, CTA, and input, report whether:",
             "1. legible: its text has adequate contrast by eye;",
             "2. centred: its label plus any accompanying icon are visually centred as one group; an arrow or icon beside text is not by itself off-centre;",
-            "3. matches_sibling: it matches any named sibling in text colour, font family (serif vs sans), font weight, and alignment;",
-            "4. no_overflow: no text is overflowing or clipped;",
-            "5. no_raw_markdown: it shows no raw Markdown or code fences.",
-            "A size difference between a header button and a full-width drawer button is expected and is not a failure.",
-            "If a sibling is not visible, set matches_sibling true only when there is no visible mismatch to assess and explain that limitation.",
+            "3. no_overflow: no text is overflowing or clipped;",
+            "4. no_raw_markdown: it shows no raw Markdown or code fences.",
+            "Also return one advisory pairs entry for every declared pair above and no other pairs.",
+            "For each declared pair, compare only text_colour, font_family (serif vs sans), font_weight, and alignment.",
+            "Size and width differences are expected and must not affect those four pair checks.",
+            "Pair observations are advisory and must not affect any control verdict or the image verdict.",
+            "If either named control is not visible, set both_visible false, but all four checks must still be booleans.",
+            "If there are no declared pairs, return an empty pairs array.",
             "Return only one JSON object with exactly this shape:",
-            '{"controls":[{"name":"visible control name","checks":{"legible":true,"centred":true,"matches_sibling":true,"no_overflow":true,"no_raw_markdown":true},"verdict":"PASS","reason":"concise visual evidence"}],"verdict":"PASS"}',
-            "Use only PASS or FAIL. The image verdict must be FAIL when any control or check fails. Do not wrap JSON in Markdown or code fences.",
+            '{"controls":[{"name":"visible control name","checks":{"legible":true,"centred":true,"no_overflow":true,"no_raw_markdown":true},"verdict":"PASS","reason":"concise visual evidence"}],"pairs":[{"name":"declared pair name","both_visible":true,"checks":{"text_colour":true,"font_family":true,"font_weight":true,"alignment":true},"reason":"concise visual evidence"}],"verdict":"PASS"}',
+            "Use only PASS or FAIL for control and image verdicts. The image verdict must be FAIL when any control check fails; advisory pair checks never change it. Do not wrap JSON in Markdown or code fences.",
         )
     )
 
@@ -90,7 +113,9 @@ def extract_first_json_object(content: str) -> dict[str, Any]:
             continue
         if isinstance(value, dict):
             return value
-    raise ValueError("model result.response does not contain a JSON object")
+    raise InvalidAuditResponse(
+        "model result.response does not contain a JSON object"
+    )
 
 
 def parse_result_response(result: dict[str, Any]) -> dict[str, Any]:
@@ -112,7 +137,7 @@ def parse_result_response(result: dict[str, Any]) -> dict[str, Any]:
     )
     if content is None:
         raise EmptyAuditResponse(message)
-    raise ValueError(message)
+    raise InvalidAuditResponse(message)
 
 
 def retry_delay(retry: int, retry_after: str | None = None) -> float:
@@ -214,33 +239,39 @@ def request_audit(
     raise RuntimeError("Workers AI request failed after retries")
 
 
-def normalize_audit(raw: Any) -> dict[str, Any]:
+def normalize_audit(
+    raw: Any, declared_pairs: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    if declared_pairs is None:
+        declared_pairs = []
     if not isinstance(raw, dict):
-        raise ValueError("response is not an object")
+        raise InvalidAuditResponse("response is not an object")
     controls = raw.get("controls")
     if not isinstance(controls, list) or not controls:
         raise EmptyAuditResponse("controls must be a non-empty list")
 
-    normalized_controls = []
+    normalized_controls: list[dict[str, Any]] = []
     has_failure = False
     for index, control in enumerate(controls):
         if not isinstance(control, dict):
-            raise ValueError(f"control {index} is not an object")
+            raise InvalidAuditResponse(f"control {index} is not an object")
         name = control.get("name")
         reason = control.get("reason")
         checks = control.get("checks")
         if not isinstance(name, str) or not name.strip():
-            raise ValueError(f"control {index} has no name")
+            raise InvalidAuditResponse(f"control {index} has no name")
         if not isinstance(reason, str) or not reason.strip():
-            raise ValueError(f"control {index} has no reason")
+            raise InvalidAuditResponse(f"control {index} has no reason")
         if not isinstance(checks, dict):
-            raise ValueError(f"control {index} checks is not an object")
+            raise InvalidAuditResponse(f"control {index} checks is not an object")
 
         normalized_checks = {}
         for check_name in CHECK_NAMES:
             value = checks.get(check_name)
             if not isinstance(value, bool):
-                raise ValueError(f"control {index} check {check_name} is not boolean")
+                raise InvalidAuditResponse(
+                    f"control {index} check {check_name} is not boolean"
+                )
             normalized_checks[check_name] = value
 
         control_failed = not all(normalized_checks.values())
@@ -254,8 +285,83 @@ def normalize_audit(raw: Any) -> dict[str, Any]:
             }
         )
 
+    expected_pairs: dict[str, str] = {}
+    for index, pair in enumerate(declared_pairs):
+        if not isinstance(pair, dict):
+            raise InvalidAuditResponse(f"declared pair {index} is not an object")
+        name = pair.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise InvalidAuditResponse(f"declared pair {index} has no name")
+        name_key = name.strip().casefold()
+        if name_key in expected_pairs:
+            raise InvalidAuditResponse(f"declared pair {name!r} is duplicated")
+        expected_pairs[name_key] = name.strip()
+
+    pairs = raw.get("pairs")
+    if not isinstance(pairs, list):
+        raise InvalidAuditResponse("pairs must be a list")
+
+    normalized_pairs: list[dict[str, Any]] = []
+    seen_pairs: set[str] = set()
+    for index, pair in enumerate(pairs):
+        if not isinstance(pair, dict):
+            raise InvalidAuditResponse(f"pair {index} is not an object")
+        name = pair.get("name")
+        reason = pair.get("reason")
+        both_visible = pair.get("both_visible")
+        checks = pair.get("checks")
+        if not isinstance(name, str) or not name.strip():
+            raise InvalidAuditResponse(f"pair {index} has no name")
+        name_key = name.strip().casefold()
+        if name_key not in expected_pairs:
+            raise InvalidAuditResponse(f"pair {name!r} is not declared for this state")
+        if name_key in seen_pairs:
+            raise InvalidAuditResponse(f"pair {name!r} is duplicated")
+        if not isinstance(reason, str) or not reason.strip():
+            raise InvalidAuditResponse(f"pair {index} has no reason")
+        if not isinstance(both_visible, bool):
+            raise InvalidAuditResponse(f"pair {index} both_visible is not boolean")
+        if not isinstance(checks, dict):
+            raise InvalidAuditResponse(f"pair {index} checks is not an object")
+
+        normalized_checks = {}
+        for check_name in PAIR_CHECK_NAMES:
+            value = checks.get(check_name)
+            if not isinstance(value, bool):
+                raise InvalidAuditResponse(
+                    f"pair {index} check {check_name} is not boolean"
+                )
+            normalized_checks[check_name] = value
+
+        pair_failed = both_visible and not all(normalized_checks.values())
+        pair_verdict = (
+            "NOT_ASSESSED"
+            if not both_visible
+            else "FAIL" if pair_failed else "PASS"
+        )
+        normalized_pairs.append(
+            {
+                "name": expected_pairs[name_key],
+                "both_visible": both_visible,
+                "checks": normalized_checks,
+                "verdict": pair_verdict,
+                "reason": reason,
+            }
+        )
+        seen_pairs.add(name_key)
+
+    missing_pairs = [
+        expected_pairs[name_key]
+        for name_key in expected_pairs.keys() - seen_pairs
+    ]
+    if missing_pairs:
+        raise InvalidAuditResponse(
+            "missing declared pair entries: " + ", ".join(sorted(missing_pairs))
+        )
+
     return {
         "controls": normalized_controls,
+        "pairs": normalized_pairs,
         "verdict": "FAIL" if has_failure else "PASS",
     }
 
@@ -270,59 +376,67 @@ def request_normalized_audit(
     for attempt in range(attempts):
         try:
             return normalize_audit(
-                request_audit(account_id, api_token, image_path, metadata)
+                request_audit(account_id, api_token, image_path, metadata),
+                metadata.get("pairs", []),
             )
-        except EmptyAuditResponse as error:
+        except AuditResponseError as error:
             if attempt == attempts - 1:
-                raise EmptyAuditResponse(
-                    f"{error}; empty audit persisted after {attempts} attempts"
+                if isinstance(error, EmptyAuditResponse):
+                    raise EmptyAuditResponse(
+                        f"{error}; empty audit persisted after {attempts} attempts"
+                    ) from error
+                raise InvalidAuditResponse(
+                    f"{error}; schema-invalid audit persisted after {attempts} attempts"
                 ) from error
-    raise RuntimeError("empty audit retry loop ended unexpectedly")
+    raise RuntimeError("audit response retry loop ended unexpectedly")
 
 
 def control_name_key(control: dict[str, Any]) -> str:
     return control["name"].strip().casefold()
 
 
+def effective_recheck_items(
+    first_items: list[dict[str, Any]], second_items: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    second_passes = {
+        control_name_key(item): item
+        for item in second_items
+        if item["verdict"] == "PASS"
+    }
+    effective: list[dict[str, Any]] = []
+    included_names: set[str] = set()
+    for item in first_items:
+        name_key = control_name_key(item)
+        if item["verdict"] == "FAIL" and name_key in second_passes:
+            effective.append(second_passes[name_key])
+        else:
+            effective.append(item)
+        included_names.add(name_key)
+
+    for item in second_items:
+        name_key = control_name_key(item)
+        if item["verdict"] == "PASS" and name_key not in included_names:
+            effective.append(item)
+            included_names.add(name_key)
+    return effective
+
+
 def adjudicate_recheck(
     first: dict[str, Any], second: dict[str, Any]
 ) -> dict[str, Any]:
-    first_failed_names = {
-        control_name_key(control)
-        for control in first["controls"]
-        if control["verdict"] == "FAIL"
-    }
-    second_passes = {
-        control_name_key(control): control
-        for control in second["controls"]
-        if control["verdict"] == "PASS"
-    }
-
-    controls: list[dict[str, Any]] = []
-    included_names: set[str] = set()
-    for control in first["controls"]:
-        name_key = control_name_key(control)
-        if control["verdict"] == "FAIL" and name_key in second_passes:
-            controls.append(second_passes[name_key])
-        else:
-            controls.append(control)
-        included_names.add(name_key)
-
-    for control in second["controls"]:
-        name_key = control_name_key(control)
-        if control["verdict"] == "PASS" and name_key not in included_names:
-            controls.append(control)
-            included_names.add(name_key)
+    controls = effective_recheck_items(first["controls"], second["controls"])
+    pairs = effective_recheck_items(first["pairs"], second["pairs"])
 
     if not controls:
         raise ValueError(
             "Recheck adjudication produced no effective controls; image fails closed."
         )
 
-    unresolved_failures = first_failed_names - second_passes.keys()
+    has_failure = any(item["verdict"] == "FAIL" for item in controls)
     return {
         "controls": controls,
-        "verdict": "FAIL" if unresolved_failures else "PASS",
+        "pairs": pairs,
+        "verdict": "FAIL" if has_failure else "PASS",
         "rechecks": [first, second],
     }
 
@@ -356,15 +470,24 @@ def audit_image(
                 account_id, api_token, image_path, metadata
             )
             normalized = adjudicate_recheck(normalized, recheck)
-        result = {"image": image_path.name, **metadata, **normalized}
+        result = {
+            "image": image_path.name,
+            "route": metadata["route"],
+            "viewport": metadata["viewport"],
+            "state": metadata["state"],
+            **normalized,
+        }
         if image_path.name not in metadata_by_image:
             result["verdict"] = "FAIL"
             result["error"] = "Screenshot has no matching ui-states.json entry."
     except Exception as error:  # Every request error must be recorded and fail the gate.
         result = {
             "image": image_path.name,
-            **metadata,
+            "route": metadata["route"],
+            "viewport": metadata["viewport"],
+            "state": metadata["state"],
             "controls": [],
+            "pairs": [],
             "verdict": "FAIL",
             "error": str(error),
         }
@@ -377,25 +500,34 @@ def table_reason(result: dict[str, Any]) -> str:
     failed = [control for control in result["controls"] if control["verdict"] == "FAIL"]
     if failed:
         return f"{failed[0]['name']}: {failed[0]['reason']}"
-    return "All reported controls passed."
+    return "All reported controls passed; pair observations are advisory."
 
 
 def markdown_cell(value: Any) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ")
 
 
+def pair_summary(result: dict[str, Any]) -> str:
+    pairs = result.get("pairs", [])
+    passed = sum(pair.get("verdict") == "PASS" for pair in pairs)
+    failed = sum(pair.get("verdict") == "FAIL" for pair in pairs)
+    not_assessed = sum(pair.get("verdict") == "NOT_ASSESSED" for pair in pairs)
+    return f"{passed} pass / {failed} fail / {not_assessed} not assessed"
+
+
 def write_summary(results: list[dict[str, Any]], verdict: str) -> None:
     lines = [
         "## Workers AI visual audit",
         "",
-        "| Image | Controls | Verdict | Result |",
-        "| --- | ---: | :---: | --- |",
+        "| Image | Controls | Pairs (advisory) | Verdict | Result |",
+        "| --- | ---: | --- | :---: | --- |",
     ]
     for result in results:
         lines.append(
-            "| {image} | {count} | {verdict} | {reason} |".format(
+            "| {image} | {count} | {pairs} | {verdict} | {reason} |".format(
                 image=markdown_cell(result["image"]),
                 count=len(result.get("controls", [])),
+                pairs=pair_summary(result),
                 verdict=result["verdict"],
                 reason=markdown_cell(table_reason(result)),
             )
@@ -435,7 +567,10 @@ def main() -> int:
         results.append(
             {
                 "image": missing_name,
-                **metadata,
+                "route": metadata["route"],
+                "viewport": metadata["viewport"],
+                "state": metadata["state"],
+                "pairs": [],
                 "controls": [],
                 "verdict": "FAIL",
                 "error": reason,
@@ -464,16 +599,15 @@ def main() -> int:
             failed_controls = [
                 control for control in result.get("controls", []) if control["verdict"] == "FAIL"
             ]
-            if failed_controls:
-                for control in failed_controls:
-                    must.append(
-                        {
-                            "image": result["image"],
-                            "control": control["name"],
-                            "reason": control["reason"],
-                        }
-                    )
-            else:
+            for control in failed_controls:
+                must.append(
+                    {
+                        "image": result["image"],
+                        "control": control["name"],
+                        "reason": control["reason"],
+                    }
+                )
+            if not failed_controls:
                 must.append(
                     {
                         "image": result["image"],

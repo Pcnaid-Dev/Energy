@@ -8,6 +8,7 @@ const repoRoot = path.resolve(visualDir, '../..');
 const stateConfig = JSON.parse(
   await readFile(path.join(repoRoot, 'ui-states.json'), 'utf8')
 );
+const pairArtifactPath = path.join(repoRoot, 'visual-out', 'pairs.json');
 
 const RATE_WIDGET_FIXTURE = {
   zip: '76063',
@@ -184,6 +185,160 @@ async function performAction(page, action) {
   }
 }
 
+async function readPairControl(page, control) {
+  const locator = page.locator(control.selector).first();
+  if (!(await locator.isVisible())) {
+    return {
+      name: control.name,
+      selector: control.selector,
+      visible: false
+    };
+  }
+
+  const values = await locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const labelBox = range.getBoundingClientRect();
+    const buttonBox = element.getBoundingClientRect();
+    const labelCentre = labelBox.left + labelBox.width / 2;
+    const buttonCentre = buttonBox.left + buttonBox.width / 2;
+    const offset = Math.abs(labelCentre - buttonCentre);
+    const firstFontFamily = style.fontFamily
+      .split(',')[0]
+      .trim()
+      .replace(/^(['"])(.*)\1$/, '$2');
+
+    return {
+      color: style.color,
+      fontFamily: firstFontFamily,
+      fontWeight: style.fontWeight,
+      textAlign: style.textAlign,
+      horizontalCentring: {
+        centred: offset <= 2,
+        offsetPx: Math.round(offset * 1000) / 1000
+      }
+    };
+  });
+
+  return {
+    name: control.name,
+    selector: control.selector,
+    visible: true,
+    values
+  };
+}
+
+function comparedValue(control, property) {
+  if (property === 'horizontal-centring') {
+    const centring = control.values.horizontalCentring;
+    return `${centring.centred ? 'centred' : 'not centred'} (${centring.offsetPx}px offset)`;
+  }
+  return control.values[property];
+}
+
+export async function compareDeclaredPairs(page, pairs) {
+  const results = [];
+
+  for (const pair of pairs) {
+    if (!Array.isArray(pair.controls) || pair.controls.length !== 2) {
+      throw new Error(`Pair "${pair.name}" must declare exactly two controls.`);
+    }
+
+    const controls = [];
+    for (const control of pair.controls) {
+      controls.push(await readPairControl(page, control));
+    }
+
+    const hiddenControls = controls.filter((control) => !control.visible);
+    if (hiddenControls.length > 0) {
+      results.push({
+        name: pair.name,
+        status: 'not-assessed',
+        reason: `Selector not visible: ${hiddenControls.map((control) => control.selector).join(', ')}`,
+        controls,
+        checks: []
+      });
+      continue;
+    }
+
+    const properties = [
+      ['color', 'color'],
+      ['font-family', 'fontFamily'],
+      ['font-weight', 'fontWeight'],
+      ['text-align', 'textAlign'],
+      ['horizontal-centring', 'horizontal-centring']
+    ];
+    const checks = properties.map(([property, valueKey]) => {
+      const firstValue = comparedValue(controls[0], valueKey);
+      const secondValue = comparedValue(controls[1], valueKey);
+      const matches = property === 'horizontal-centring'
+        ? controls[0].values.horizontalCentring.centred === controls[1].values.horizontalCentring.centred
+        : firstValue === secondValue;
+      return {
+        property,
+        matches,
+        values: [
+          { control: controls[0].name, value: firstValue },
+          { control: controls[1].name, value: secondValue }
+        ]
+      };
+    });
+
+    results.push({
+      name: pair.name,
+      status: checks.every((check) => check.matches) ? 'pass' : 'fail',
+      controls,
+      checks
+    });
+  }
+
+  return results;
+}
+
+async function recordPairResults(route, viewport, state, image, pairs) {
+  const result = {
+    image,
+    route: route.path,
+    viewport,
+    state: state.name,
+    pairs
+  };
+  await mkdir(path.dirname(pairArtifactPath), { recursive: true });
+  let artifact = { results: [] };
+  try {
+    artifact = JSON.parse(await readFile(pairArtifactPath, 'utf8'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  artifact.results = artifact.results.filter((entry) => entry.image !== image);
+  artifact.results.push(result);
+  await writeFile(
+    pairArtifactPath,
+    `${JSON.stringify(artifact, null, 2)}\n`
+  );
+}
+
+function expectMatchingPairs(pairResults) {
+  for (const pair of pairResults) {
+    for (const check of pair.checks) {
+      const [first, second] = check.values;
+      expect.soft(
+        check.matches,
+        `Pair "${pair.name}" ${check.property} mismatch: ` +
+          `${first.control}=${JSON.stringify(first.value)}, ` +
+          `${second.control}=${JSON.stringify(second.value)}`
+      ).toBe(true);
+    }
+  }
+}
+
+test.beforeAll(async ({}, testInfo) => {
+  if (testInfo.workerIndex !== 0) return;
+  await mkdir(path.dirname(pairArtifactPath), { recursive: true });
+  await writeFile(pairArtifactPath, `${JSON.stringify({ results: [] }, null, 2)}\n`);
+});
+
 for (const [viewportName, viewport] of Object.entries(stateConfig.viewports)) {
   test.describe(viewportName, () => {
     test.use({
@@ -223,6 +378,19 @@ for (const [viewportName, viewport] of Object.entries(stateConfig.viewports)) {
             requestAnimationFrame(() => requestAnimationFrame(resolve));
           }));
 
+          const screenshotName = `${route.id}-${viewportName}-${state.name}.png`;
+          if (state.pairs.length > 0) {
+            const pairResults = await compareDeclaredPairs(page, state.pairs);
+            await recordPairResults(
+              route,
+              viewportName,
+              state,
+              screenshotName,
+              pairResults
+            );
+            expectMatchingPairs(pairResults);
+          }
+
           let clip;
           if (state.clip) {
             const clipTarget = page.locator(state.clip);
@@ -231,7 +399,6 @@ for (const [viewportName, viewport] of Object.entries(stateConfig.viewports)) {
             if (!clip) throw new Error(`Clip selector is not visible: ${state.clip}`);
           }
 
-          const screenshotName = `${route.id}-${viewportName}-${state.name}.png`;
           const outputPath = path.join(repoRoot, 'visual-out', screenshotName);
           const mask = stateConfig.mask.map((selector) => page.locator(selector));
           await mkdir(path.dirname(outputPath), { recursive: true });
@@ -260,3 +427,36 @@ for (const [viewportName, viewport] of Object.entries(stateConfig.viewports)) {
     }
   });
 }
+
+test.describe('deterministic pair comparison regression', () => {
+  const viewport = stateConfig.viewports.mobile;
+  test.use({
+    viewport: { width: viewport.width, height: viewport.height },
+    deviceScaleFactor: viewport.deviceScaleFactor,
+    isMobile: viewport.isMobile,
+    hasTouch: viewport.hasTouch
+  });
+
+  test('rejects a serif drawer CTA override (d317 e)', async ({ page }) => {
+    const route = stateConfig.routes.find((candidate) => candidate.id === 'root');
+    const state = route.states.mobile.find((candidate) => candidate.name === 'drawer-open');
+
+    await installNetworkFixtures(page);
+    await page.goto(route.path, { waitUntil: 'load' });
+    await page.evaluate(async () => {
+      if (document.fonts) await document.fonts.ready;
+    });
+    for (const action of state.actions) {
+      await performAction(page, action);
+    }
+    await page.addStyleTag({
+      content: '.mobile-menu .btn-primary { font-family: serif !important; }'
+    });
+
+    const [result] = await compareDeclaredPairs(page, state.pairs);
+    const fontFamily = result.checks.find((check) => check.property === 'font-family');
+
+    expect(result.status).toBe('fail');
+    expect(fontFamily.matches).toBe(false);
+  });
+});
