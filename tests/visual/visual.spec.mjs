@@ -81,9 +81,17 @@ const WIDGET_FIXTURE_SCRIPT = String.raw`
         select.setAttribute('aria-expanded', open ? 'true' : 'false');
         dropdown.style.display = open ? 'block' : 'none';
       }
+      function isOutsideSelect(target) {
+        return !select.contains(target);
+      }
       select.addEventListener('click', function (event) {
         if (!event.target.closest('.el-select-dropdown')) {
-          setOpen(!select.classList.contains('is-open'));
+          setOpen(true);
+        }
+      });
+      document.addEventListener('click', function (event) {
+        if (isOutsideSelect(event.target)) {
+          setOpen(false);
         }
       });
       select.addEventListener('keydown', function (event) {

@@ -263,6 +263,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
+            Write your results to ${{ github.workspace }}/vision-claude.json and no other file.
             Act as the design-audit agent defined in .claude/agents/design-audit.md. Read that file first.
             The configured screenshots are already captured; do not run a browser or a build, and do not require authority files outside this checkout.
             Read ui-states.json and every PNG under visual-out/ using Glob and Read. Do not skip an image.
@@ -274,16 +275,25 @@ jobs:
             - no_raw_markdown: no raw Markdown or code fences are visible
             A size difference between a header button and a full-width drawer button is expected and is not a failure.
             Treat every failed check as a MUST finding. Use only facts visible in the screenshots.
-            Write vision-claude.json and no other file. It must be valid JSON, with no Markdown fences, in this exact root schema:
+            It must be valid JSON, with no Markdown fences, in this exact root schema:
             {"model":"claude","results":[{"image":"basename.png","route":"/route","viewport":"mobile|desktop","state":"state-name","pairs":[],"controls":[{"name":"visible control name","checks":{"legible":true,"centred":true,"matches_sibling":true,"no_overflow":true,"no_raw_markdown":true},"verdict":"PASS|FAIL","reason":"concise visual evidence"}],"verdict":"PASS|FAIL"}],"must":[{"image":"basename.png","control":"control name","reason":"finding"}],"verdict":"PASS|FAIL"}
             Include exactly one results entry for every PNG. The root verdict and image verdict must be FAIL if any check fails, and every failed control must appear in must. Use an empty must list only when every image passes.
-          claude_args: '--allowedTools "Read,Glob,Write"'
+          claude_args: '--allowedTools "Read,Glob,Write" --permission-mode acceptEdits'
 
       - name: Validate Claude audit
         id: validate-claude
         if: always()
         continue-on-error: true
-        run: python3 .github/scripts/validate-vision.py vision-claude.json
+        run: |
+          if ! [ -f vision-claude.json ]; then
+            PERM_DENIALS=0
+            if [ -f /home/runner/work/_temp/claude-execution-output.json ]; then
+              PERM_DENIALS=$(python3 -c "import json; d=json.load(open('/home/runner/work/_temp/claude-execution-output.json')); print(d.get('permission_denials_count', 0))" 2>/dev/null || echo 0)
+            fi
+            echo "Claude did not write vision-claude.json (permission denials: $PERM_DENIALS)"
+            exit 1
+          fi
+          python3 .github/scripts/validate-vision.py vision-claude.json
 
       - name: Upload Claude audit
         if: always()
