@@ -237,6 +237,50 @@ jobs:
         if: ${{ always() && steps.grok-audit.outcome != 'success' }}
         run: exit 1
 
+  vision-workersai:
+    name: Workers AI vision audit
+    needs: visual
+    if: ${{ always() && needs.visual.outputs.has-screenshots == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download captured UI states
+        uses: actions/download-artifact@v4
+        with:
+          name: visual-out
+          path: visual-out
+
+      - name: Audit every image with Llama 4 Scout
+        id: workersai-audit
+        continue-on-error: true
+        env:
+          WORKERS_AI_TOKEN: ${{ secrets.WORKERS_AI_TOKEN }}
+          WORKERS_AI_ACCOUNT_ID: ${{ secrets.WORKERS_AI_ACCOUNT_ID }}
+        run: python3 .github/scripts/vision-workersai.py
+
+      - name: Validate Workers AI audit
+        id: validate-workersai
+        if: always()
+        continue-on-error: true
+        run: python3 .github/scripts/validate-vision.py vision-workersai.json
+
+      - name: Upload Workers AI audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vision-workersai
+          path: vision-workersai.json
+          if-no-files-found: warn
+
+      - name: Enforce Workers AI audit
+        if: ${{ always() && (steps.workersai-audit.outcome != 'success' || steps.validate-workersai.outcome != 'success') }}
+        run: exit 1
+
   vision-claude:
     name: Claude vision audit
     needs: visual
@@ -312,8 +356,9 @@ jobs:
     needs:
       - visual
       - vision-grok
+      - vision-workersai
       - vision-claude
-    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.visual.result == 'success' && needs.vision-grok.result == 'success' && (needs.vision-claude.result == 'success' || needs.vision-claude.result == 'skipped') }}
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.visual.result == 'success' && needs.vision-grok.result == 'success' && needs.vision-workersai.result == 'success' && (needs.vision-claude.result == 'success' || needs.vision-claude.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment: production
     permissions:
