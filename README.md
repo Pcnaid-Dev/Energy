@@ -35,7 +35,7 @@ The workflow installs JavaScript dependencies with `npm ci`; a committed `packag
 3. Inspect every generated image. The baseline diff is the review; accepting a baseline accepts that rendered UI.
 4. Copy the reviewed PNGs into `tests/visual/__screenshots__/`, then commit them in a pull request with the related UI change.
 
-Normal pull-request and `main` runs never create missing baselines. If no committed baseline exists, the workflow fails with instructions to use the manual update flow.
+For the first-run bootstrap before manual dispatch is available, a run with no committed baselines captures in update mode, uploads candidate PNGs as the `baselines` artifact for review, and then fails; CI never commits baselines.
 
 ### `ui-states.json`
 

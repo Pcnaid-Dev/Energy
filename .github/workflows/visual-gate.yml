@@ -46,14 +46,15 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
-      - name: Require committed baselines
-        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.update_baselines) }}
+      - name: Check committed baselines
+        id: baselines-check
         shell: bash
         run: |
           set -euo pipefail
-          if ! find tests/visual/__screenshots__ -type f -name '*.png' -print -quit 2>/dev/null | grep -q .; then
-            echo "::error::No visual baselines exist. Run workflow_dispatch with update_baselines=true, download the baselines artifact, inspect every image, and commit them in a PR."
-            exit 1
+          if find tests/visual/__screenshots__ -type f -name '*.png' -print -quit 2>/dev/null | grep -q .; then
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "missing=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Capture and compare UI states
@@ -61,7 +62,7 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          UPDATE_BASELINES: ${{ github.event_name == 'workflow_dispatch' && inputs.update_baselines && 'true' || 'false' }}
+          UPDATE_BASELINES: ${{ ((github.event_name == 'workflow_dispatch' && inputs.update_baselines) || steps.baselines-check.outputs.missing == 'true') && 'true' || 'false' }}
         run: |
           set -euo pipefail
           if [[ "$UPDATE_BASELINES" == "true" ]]; then
@@ -71,7 +72,7 @@ jobs:
           fi
 
       - name: Upload generated baselines
-        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.update_baselines }}
+        if: ${{ always() && ((github.event_name == 'workflow_dispatch' && inputs.update_baselines) || steps.baselines-check.outputs.missing == 'true') }}
         uses: actions/upload-artifact@v4
         with:
           name: baselines
@@ -188,6 +189,14 @@ jobs:
         if: ${{ always() && steps.visual-test.outcome == 'failure' }}
         shell: bash
         run: exit 1
+
+      - name: Fail when committed baselines are missing
+        if: ${{ always() && steps.baselines-check.outputs.missing == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.update_baselines) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '::error::No visual baselines exist. Run workflow_dispatch with update_baselines=true, download the baselines artifact, inspect every image, and commit them in a PR. candidate baselines were uploaded as the `baselines` artifact for review'
+          exit 1
 
   vision-gpt:
     name: GPT vision audit
