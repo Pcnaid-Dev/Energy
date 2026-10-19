@@ -1,0 +1,5 @@
+node_modules/
+visual-out/
+test-results/
+playwright-report/
+dist/

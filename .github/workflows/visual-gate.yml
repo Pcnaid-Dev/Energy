@@ -1,0 +1,338 @@
+name: Energy visual gate
+
+'on':
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      update_baselines:
+        description: Generate baseline screenshots and upload them for review
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: visual-gate-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  visual:
+    name: Pixel diff
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+      options: --ipc=host
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      has-screenshots: ${{ steps.visual-files.outputs.has-screenshots }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Python static server
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends python3
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Require committed baselines
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.update_baselines) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! find tests/visual/__screenshots__ -type f -name '*.png' -print -quit 2>/dev/null | grep -q .; then
+            echo "::error::No visual baselines exist. Run workflow_dispatch with update_baselines=true, download the baselines artifact, inspect every image, and commit them in a PR."
+            exit 1
+          fi
+
+      - name: Capture and compare UI states
+        id: visual-test
+        continue-on-error: true
+        shell: bash
+        env:
+          UPDATE_BASELINES: ${{ github.event_name == 'workflow_dispatch' && inputs.update_baselines && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          if [[ "$UPDATE_BASELINES" == "true" ]]; then
+            npm run test:visual -- --update-snapshots=all
+          else
+            npm run test:visual -- --update-snapshots=none
+          fi
+
+      - name: Upload generated baselines
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.update_baselines }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: baselines
+          path: tests/visual/__screenshots__/
+          if-no-files-found: error
+
+      - name: Upload captured UI states
+        id: visual-artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-out
+          path: visual-out/
+          if-no-files-found: warn
+
+      - name: Upload Playwright test results
+        id: test-results-artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results
+          path: test-results/
+          if-no-files-found: warn
+
+      - name: Report screenshot availability
+        id: visual-files
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if find visual-out -type f -name '*.png' -print -quit 2>/dev/null | grep -q .; then
+            echo "has-screenshots=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-screenshots=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update sticky pull-request comment
+        if: ${{ github.event_name == 'pull_request' && (steps.visual-test.outcome == 'success' || steps.visual-test.outcome == 'failure') }}
+        uses: actions/github-script@v7
+        env:
+          TEST_OUTCOME: ${{ steps.visual-test.outcome }}
+          VISUAL_ARTIFACT_URL: ${{ steps.visual-artifact.outputs.artifact-url }}
+          RESULTS_ARTIFACT_URL: ${{ steps.test-results-artifact.outputs.artifact-url }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- energy-visual-gate -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100
+            });
+            const existing = comments.find((comment) => comment.body?.includes(marker));
+
+            if (process.env.TEST_OUTCOME === 'success') {
+              if (!existing) return;
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body: `${marker}\n## Energy visual gate\n\nPixel diff passed for this revision.`
+              });
+              return;
+            }
+
+            const failures = [];
+            const walk = (suites, parents = []) => {
+              for (const suite of suites || []) {
+                const nextParents = suite.title ? [...parents, suite.title] : parents;
+                for (const spec of suite.specs || []) {
+                  const failed = (spec.tests || []).some((entry) =>
+                    (entry.results || []).some((result) =>
+                      ['failed', 'timedOut', 'interrupted'].includes(result.status)
+                    )
+                  );
+                  if (failed) failures.push([...nextParents, spec.title].filter(Boolean).join(' / '));
+                }
+                walk(suite.suites, nextParents);
+              }
+            };
+
+            try {
+              const report = JSON.parse(fs.readFileSync('test-results/results.json', 'utf8'));
+              walk(report.suites);
+            } catch (error) {
+              failures.push(`Visual test run failed before structured results were available: ${error.message}`);
+            }
+
+            const uniqueFailures = [...new Set(failures)];
+            const visualUrl = process.env.VISUAL_ARTIFACT_URL;
+            const resultsUrl = process.env.RESULTS_ARTIFACT_URL;
+            const links = [
+              visualUrl && `[captured PNGs](${visualUrl})`,
+              resultsUrl && `[diff / actual / expected PNGs](${resultsUrl})`
+            ].filter(Boolean).join(' · ');
+            const items = uniqueFailures.map((failure) => `- \`${failure}\` — ${links || 'see this workflow run'}`);
+            const body = [
+              marker,
+              '## Energy visual gate: pixel diff failed',
+              '',
+              ...items
+            ].join('\n');
+
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Enforce pixel-diff result
+        if: ${{ always() && steps.visual-test.outcome == 'failure' }}
+        shell: bash
+        run: exit 1
+
+  vision-gpt:
+    name: GPT vision audit
+    needs: visual
+    if: ${{ always() && needs.visual.outputs.has-screenshots == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      models: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download captured UI states
+        uses: actions/download-artifact@v4
+        with:
+          name: visual-out
+          path: visual-out
+
+      - name: Audit every image with GPT-4.1
+        id: gpt-audit
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 .github/scripts/vision-gpt.py
+
+      - name: Upload GPT audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vision-gpt
+          path: vision-gpt.json
+          if-no-files-found: warn
+
+      - name: Enforce GPT audit
+        if: ${{ always() && steps.gpt-audit.outcome != 'success' }}
+        run: exit 1
+
+  vision-claude:
+    name: Claude vision audit
+    needs: visual
+    if: ${{ always() && needs.visual.outputs.has-screenshots == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download captured UI states
+        uses: actions/download-artifact@v4
+        with:
+          name: visual-out
+          path: visual-out
+
+      - name: Audit every image with Claude
+        id: claude-audit
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Act as the design-audit agent defined in .claude/agents/design-audit.md. Read that file first.
+            The configured screenshots are already captured; do not run a browser or a build, and do not require authority files outside this checkout.
+            Read ui-states.json and every PNG under visual-out/ using Glob and Read. Do not skip an image.
+            For every visible button, link, CTA, and input in each image, check all of the following:
+            - legible: text contrast is adequate by eye
+            - centred: the label is visually centred in its control
+            - matches_sibling: controls named as pairs in ui-states.json use the same text colour, font family, font size, and alignment
+            - no_overflow: no text overflows or is clipped
+            - no_raw_markdown: no raw Markdown or code fences are visible
+            Treat every failed check as a MUST finding. Use only facts visible in the screenshots.
+            Write vision-claude.json and no other file. It must be valid JSON, with no Markdown fences, in this exact root schema:
+            {"model":"claude","results":[{"image":"basename.png","route":"/route","viewport":"mobile|desktop","state":"state-name","pairs":[],"controls":[{"name":"visible control name","checks":{"legible":true,"centred":true,"matches_sibling":true,"no_overflow":true,"no_raw_markdown":true},"verdict":"PASS|FAIL","reason":"concise visual evidence"}],"verdict":"PASS|FAIL"}],"must":[{"image":"basename.png","control":"control name","reason":"finding"}],"verdict":"PASS|FAIL"}
+            Include exactly one results entry for every PNG. The root verdict and image verdict must be FAIL if any check fails, and every failed control must appear in must. Use an empty must list only when every image passes.
+          claude_args: '--allowedTools "Read,Glob,Write"'
+
+      - name: Validate Claude audit
+        id: validate-claude
+        if: always()
+        continue-on-error: true
+        run: python3 .github/scripts/validate-vision.py vision-claude.json
+
+      - name: Upload Claude audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vision-claude
+          path: vision-claude.json
+          if-no-files-found: warn
+
+      - name: Enforce Claude audit
+        if: ${{ always() && (steps.claude-audit.outcome != 'success' || steps.validate-claude.outcome != 'success') }}
+        run: exit 1
+
+  deploy:
+    name: Deploy production
+    needs:
+      - visual
+      - vision-gpt
+      - vision-claude
+    if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Stage static site
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp index.html compare.html 404.html manifest.json robots.txt sitemap.xml sw-resources.json dist/
+          cp sw*.js dist/
+          cp -R assets EnergyWidget dist/
+
+      - name: Deploy to Cloudflare Pages
+        id: cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name energy --branch main
+
+      - name: Summarize deployment
+        shell: bash
+        env:
+          DEPLOYMENT_URL: ${{ steps.cloudflare.outputs.deployment-url }}
+          ACTION_DEPLOYMENT_ID: ${{ steps.cloudflare.outputs.pages-deployment-id }}
+        run: |
+          set -euo pipefail
+          deployment_id="$ACTION_DEPLOYMENT_ID"
+          if [[ -z "$deployment_id" && -n "$DEPLOYMENT_URL" ]]; then
+            deployment_id="${DEPLOYMENT_URL#*://}"
+            deployment_id="${deployment_id%%.*}"
+          fi
+          {
+            echo "## Cloudflare Pages deployment"
+            echo
+            echo "- URL: ${DEPLOYMENT_URL:-unavailable}"
+            echo "- ID: ${deployment_id:-unavailable}"
+          } >> "$GITHUB_STEP_SUMMARY"

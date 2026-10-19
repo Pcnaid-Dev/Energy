@@ -1,0 +1,11 @@
+{
+  "name": "pcnaid-energy-visual-gate",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "test:visual": "playwright test --config=tests/visual/playwright.config.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}

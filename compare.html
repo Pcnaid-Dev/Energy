@@ -348,6 +348,27 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
   text-decoration:none;
 }
 .mobile-menu a:hover{ color:var(--brand); }
+.mobile-menu .btn-primary{
+  color:#fff;
+  font-family:var(--font-body);
+  font-size:.95rem;
+  font-weight:600;
+  display:flex;
+  width:100%;
+  align-items:center;
+  justify-content:center;
+  gap:.55rem;
+  padding:.95rem 1.4rem;
+  border-radius:var(--radius-btn);
+  border:1px solid transparent;
+  text-decoration:none;
+  background:var(--emerald);
+}
+.mobile-menu .btn-primary:hover,
+.mobile-menu .btn-primary:focus-visible{
+  background:var(--emerald-deep);
+  color:#fff;
+}
 .mobile-menu .btn{ margin-top:1.5rem; width:100%; }
 .mobile-menu .mono-info{
   margin-top:2rem; font-family:var(--font-mono); font-size:.85rem; color:var(--muted);
