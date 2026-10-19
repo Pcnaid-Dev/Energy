@@ -1,0 +1,211 @@
+{
+  "schemaVersion": 1,
+  "mask": [
+    "#year"
+  ],
+  "viewports": {
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "deviceScaleFactor": 2,
+      "isMobile": true,
+      "hasTouch": true
+    },
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "deviceScaleFactor": 1,
+      "isMobile": false,
+      "hasTouch": false
+    }
+  },
+  "routes": [
+    {
+      "id": "root",
+      "path": "/",
+      "states": {
+        "mobile": [
+          {
+            "name": "default",
+            "actions": [],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "drawer-open",
+            "actions": [
+              {"action": "click", "selector": ".hamburger", "waitFor": ".mobile-menu.open"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "drawer-cta-hover",
+            "actions": [
+              {"action": "click", "selector": ".hamburger", "waitFor": ".mobile-menu.open"},
+              {"action": "hover", "selector": ".mobile-menu .btn-primary"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "drawer-cta-focus",
+            "actions": [
+              {"action": "click", "selector": ".hamburger", "waitFor": ".mobile-menu.open"},
+              {"action": "focus", "selector": ".mobile-menu .btn-primary"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          }
+        ],
+        "desktop": [
+          {
+            "name": "default",
+            "actions": [],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "header-cta-hover",
+            "actions": [
+              {"action": "hover", "selector": ".nav-cta .btn-primary"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "header-cta-focus",
+            "actions": [
+              {"action": "focus", "selector": ".nav-cta .btn-primary"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          }
+        ]
+      }
+    },
+    {
+      "id": "compare-html",
+      "path": "/compare.html",
+      "states": {
+        "mobile": [
+          {
+            "name": "default",
+            "actions": [],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "drawer-open",
+            "actions": [
+              {"action": "click", "selector": ".hamburger", "waitFor": ".mobile-menu.open"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "drawer-cta-hover",
+            "actions": [
+              {"action": "click", "selector": ".hamburger", "waitFor": ".mobile-menu.open"},
+              {"action": "hover", "selector": ".mobile-menu .btn-primary"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "drawer-cta-focus",
+            "actions": [
+              {"action": "click", "selector": ".hamburger", "waitFor": ".mobile-menu.open"},
+              {"action": "focus", "selector": ".mobile-menu .btn-primary"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "widget-utility-open",
+            "scrollIntoView": "#widgetMount",
+            "actions": [
+              {"action": "click", "selector": "#widgetMount .el-select", "waitFor": "#widgetMount .el-select-dropdown"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          }
+        ],
+        "desktop": [
+          {
+            "name": "default",
+            "actions": [],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "header-cta-hover",
+            "actions": [
+              {"action": "hover", "selector": ".nav-cta .btn-primary"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "header-cta-focus",
+            "actions": [
+              {"action": "focus", "selector": ".nav-cta .btn-primary"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "widget-utility-open",
+            "scrollIntoView": "#widgetMount",
+            "actions": [
+              {"action": "click", "selector": "#widgetMount .el-select", "waitFor": "#widgetMount .el-select-dropdown"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          }
+        ]
+      }
+    },
+    {
+      "id": "404-html",
+      "path": "/404.html",
+      "states": {
+        "mobile": [
+          {
+            "name": "default",
+            "actions": [],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "drawer-open",
+            "actions": [
+              {"action": "click", "selector": ".hamburger", "waitFor": ".mobile-menu.open"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "drawer-cta-hover",
+            "actions": [
+              {"action": "click", "selector": ".hamburger", "waitFor": ".mobile-menu.open"},
+              {"action": "hover", "selector": ".mobile-menu .btn-primary"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "drawer-cta-focus",
+            "actions": [
+              {"action": "click", "selector": ".hamburger", "waitFor": ".mobile-menu.open"},
+              {"action": "focus", "selector": ".mobile-menu .btn-primary"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          }
+        ],
+        "desktop": [
+          {
+            "name": "default",
+            "actions": [],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "header-cta-hover",
+            "actions": [
+              {"action": "hover", "selector": ".nav-cta .btn-primary"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          },
+          {
+            "name": "header-cta-focus",
+            "actions": [
+              {"action": "focus", "selector": ".nav-cta .btn-primary"}
+            ],
+            "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
+          }
+        ]
+      }
+    }
+  ]
+}
