@@ -243,7 +243,7 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
    NAVIGATION
    ============================================ */
 .nav{
-  position:sticky; top:0; z-index:100;
+  position:sticky; top:0; z-index:10000;
   background:rgba(250,250,247,.85);
   backdrop-filter:saturate(180%) blur(14px);
   -webkit-backdrop-filter:saturate(180%) blur(14px);
@@ -305,7 +305,9 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
   color:var(--ink-2);
   text-decoration:none;
   align-items:center; gap:.4rem;
+  white-space:nowrap;
 }
+.nav-tel svg{ width:18px; height:18px; flex:none; }
 .nav-tel:hover{ color:var(--brand); text-decoration:none; }
 
 .hamburger{
@@ -318,16 +320,22 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
 
 /* mobile menu drawer */
 .mobile-menu{
-  position:fixed; inset:72px 0 0 0;
+  position:fixed;
+  top:72px;
+  left:0;
+  width:100vw;
+  height:calc(100vh - 72px);
   background:var(--bg);
-  z-index:99;
+  z-index:9999;
   padding:2rem var(--pad-x);
   transform:translateY(-100%);
   transition:transform .35s var(--ease);
   overflow-y:auto;
   border-top:1px solid var(--border);
+  pointer-events:none;
+  visibility:hidden;
 }
-.mobile-menu.open{ transform:translateY(0); }
+.mobile-menu.open{ transform:translateY(0); pointer-events:auto; visibility:visible; }
 .mobile-menu a{
   display:block;
   font-family:var(--font-display);
@@ -1104,7 +1112,7 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
 
 <body>
 
-<a class="skip" href="#quote">Skip to quote tool</a>
+<a class="skip" href="/compare">Skip to quote tool</a>
 
 <!-- ============================================ NAV ============================================ -->
 
@@ -1117,22 +1125,20 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
         <small>Energy Services</small>
       </span>
     </a>
-
-```
 <nav class="nav-links" aria-label="Primary">
-  <a href="#quote">Get a Quote</a>
-  <a href="#how-it-works">How It Works</a>
-  <a href="#availability">Service Areas</a>
-  <a href="#partners">Suppliers</a>
-  <a href="#credentials">Credentials</a>
+  <a href="/compare">Get a Quote</a>
+  <a href="/#how-it-works">How It Works</a>
+  <a href="/#availability">Service Areas</a>
+  <a href="/#partners">Suppliers</a>
+  <a href="/#credentials">Credentials</a>
 </nav>
 
 <div class="nav-cta">
   <a class="nav-tel" href="tel:+16822928094" aria-label="Call Pcnaid Energy">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.37 1.9.72 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.35 1.85.59 2.81.72A2 2 0 0 1 22 16.92z"/></svg>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.37 1.9.72 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.35 1.85.59 2.81.72A2 2 0 0 1 22 16.92z"/></svg>
     (682) 292-8094
   </a>
-  <a class="btn btn-primary btn-sm" href="#quote">
+  <a class="btn btn-primary btn-sm" href="/compare">
     Shop Rates
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
   </a>
@@ -1140,20 +1146,18 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
   </button>
 </div>
-```
-
   </div>
 
   <!-- Mobile drawer -->
 
   <div class="mobile-menu" id="mobileMenu" aria-hidden="true">
-    <a href="#quote">Get a Quote</a>
-    <a href="#how-it-works">How It Works</a>
-    <a href="#availability">Service Areas</a>
-    <a href="#partners">Suppliers</a>
-    <a href="#credentials">Credentials</a>
-    <a href="#contact">Contact</a>
-    <a class="btn btn-primary" href="#quote">Shop Electricity Rates</a>
+    <a href="/compare">Get a Quote</a>
+    <a href="/#how-it-works">How It Works</a>
+    <a href="/#availability">Service Areas</a>
+    <a href="/#partners">Suppliers</a>
+    <a href="/#credentials">Credentials</a>
+    <a href="/#contact">Contact</a>
+    <a class="btn btn-primary" href="/compare">Shop Electricity Rates</a>
     <div class="mono-info">
       <div>(682) 292-8094</div>
       <div>support@pcnaid.com</div>
@@ -1181,7 +1185,7 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
       term, and product that actually fits your business or home.
     </p>
     <div class="hero-actions">
-      <a class="btn btn-primary btn-lg" href="#quote">
+      <a class="btn btn-primary btn-lg" href="/compare">
         Compare My Rates
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
       </a>
@@ -1190,8 +1194,6 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
       </a>
       <span class="note">No-cost analysis · Takes ~3 minutes</span>
     </div>
-
-```
 <div class="trust-strip" aria-label="Pcnaid Energy at a glance">
   <div class="item">
     <span class="num">100<span style="color:var(--brand);">+</span></span>
@@ -1210,8 +1212,6 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
     <span class="lbl">kWh booked</span>
   </div>
 </div>
-```
-
   </div>
 </section>
 
@@ -1229,57 +1229,7 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
   </div>
 </div>
 
-<!-- ============================================ WIDGET EMBED ============================================ -->
 
-<section class="widget-section" id="quote">
-  <div class="container">
-    <div class="widget-shell">
-      <div class="widget-header">
-        <span class="eyebrow">Live Rates · Free Comparison</span>
-        <h2>Get your free commercial energy quote.</h2>
-        <p class="lede">
-          Enter your ZIP, usage, and contract preferences below. We'll surface every
-          available supplier rate side-by-side and you can enroll in a single session.
-          For residential plans, call us at <a href="tel:+16822928094">(682) 292-8094</a>
-          or use the same flow with a residential address.
-        </p>
-        <ul class="widget-steps">
-          <li>ZIP &amp; usage</li>
-          <li>Compare rates</li>
-          <li>Sign &amp; switch</li>
-        </ul>
-      </div>
-
-```
-  <div class="widget-mount" id="widgetMount">
-    <!-- Pcnaid placeholder shown until widget hydrates -->
-    <div class="widget-mount-loading" id="widgetLoading">
-      <div class="stack">
-        <div class="spinner" aria-hidden="true"></div>
-        <span>Loading live rate engine…</span>
-      </div>
-    </div>
-
-    <!-- MSC / Broker Online Exchange commercial pricing widget -->
-    <script id="app"
-      data-api-key="6edd8c98-5c17-4521-b292-f69e7766907b"
-      data-widget-type="comm-pricing"
-      src="https://myservicecloud.net/uploads/widgets/embed_comm_pricing.js"
-      onload="document.getElementById('widgetLoading') && (document.getElementById('widgetLoading').style.display='none')">
-    </script>
-  </div>
-
-  <div class="widget-foot">
-    <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Secured · TLS 1.3</span>
-    <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> No fee to compare</span>
-    <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Independent · 100+ suppliers</span>
-    <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Signed digitally via DocuSign</span>
-  </div>
-</div>
-```
-
-  </div>
-</section>
 
 <!-- ============================================ STATS ============================================ -->
 
@@ -1357,8 +1307,6 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
         costs and improve efficiency.
       </p>
     </div>
-
-```
 <div class="features-grid">
   <article class="feature-card reveal">
     <span class="step">01 · Efficiency</span>
@@ -1409,8 +1357,6 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
     <p>Our job is the best price on your energy — saving you thousands every year. With Pcnaid you get neutral access to top suppliers, without the per-supplier sales call.</p>
   </article>
 </div>
-```
-
   </div>
 </section>
 
@@ -1488,8 +1434,6 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
       <h2>Switching, audited and made simple.</h2>
       <p>Across Texas businesses and households, Pcnaid customers describe the experience the same way: less hassle, more savings.</p>
     </div>
-
-```
 <div class="t-tabs" role="tablist" aria-label="Testimonial filter">
   <button class="t-tab active" data-tfilter="all" role="tab" aria-selected="true">All</button>
   <button class="t-tab" data-tfilter="biz" role="tab" aria-selected="false">Business</button>
@@ -1575,8 +1519,6 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
     <div class="t-role">Residential Customer</div>
   </article>
 </div>
-```
-
   </div>
 </section>
 
@@ -1593,8 +1535,6 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
         industry's leading sustainability programs.
       </p>
     </div>
-
-```
 <div class="credentials-grid">
   <article class="credential-card">
     <div class="badge-frame">
@@ -1695,8 +1635,6 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
     </div>
   </article>
 </div>
-```
-
   </div>
 </section>
 
@@ -1708,7 +1646,7 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
     <h2>Stop overpaying. Start comparing.</h2>
     <p>Pull your last bill and we'll show you exactly how much your business can save before you commit a single dollar.</p>
     <div class="final-cta-actions">
-      <a class="btn btn-primary btn-lg" href="#quote">
+      <a class="btn btn-primary btn-lg" href="/compare">
         Compare My Rates Now
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
       </a>
@@ -1731,13 +1669,11 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
         <img src="assets/images/pcnaid-base-icon-transparent-background.svg" alt="Pcnaid" />
         <h3>Pcnaid Energy Services</h3>
         <p>Customized energy solutions for businesses and residential customers — competitive electricity and gas plans, energy consulting, and reliable customer support to help optimize costs and improve efficiency.</p>
-        <a class="btn btn-primary btn-sm" href="#quote">Shop Electricity Rates</a>
+        <a class="btn btn-primary btn-sm" href="/compare">Shop Electricity Rates</a>
         <div class="footer-bbb">
           <img src="assets/images/pcnaid-bbb-better-business-bureau-registered-business-horizontal-logo-744x283.png" alt="BBB Accredited Business" />
         </div>
       </div>
-
-```
   <div class="footer-col">
     <h4>Energy News</h4>
     <ul>
@@ -1803,8 +1739,6 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
     752 N Main St #2194, Mansfield, TX 76063
   </div>
 </div>
-```
-
   </div>
 </footer>
 
@@ -1818,8 +1752,8 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
   if(!btn || !menu) return;
   btn.addEventListener('click', () => {
     const open = menu.classList.toggle('open');
-    btn.setAttribute('aria-expanded', open);
-    menu.setAttribute('aria-hidden', !open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    menu.setAttribute('aria-hidden', open ? 'false' : 'true');
     document.body.style.overflow = open ? 'hidden' : '';
   });
   // close on link click
@@ -1829,6 +1763,16 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
     menu.setAttribute('aria-hidden','true');
     document.body.style.overflow = '';
   }));
+  // close on Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && menu.classList.contains('open')) {
+      menu.classList.remove('open');
+      btn.setAttribute('aria-expanded', 'false');
+      menu.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+      btn.focus();
+    }
+  });
 })();
 
 /* ============================================================
@@ -1875,14 +1819,7 @@ section{ padding-top:var(--pad-section); padding-bottom:var(--pad-section); posi
    ============================================================ */
 document.getElementById('year').textContent = new Date().getFullYear();
 
-/* ============================================================
-   Widget mount fallback — if the widget hasn't rendered after 12s,
-   hide the loading state anyway so users see whatever is there.
-   ============================================================ */
-setTimeout(() => {
-  const l = document.getElementById('widgetLoading');
-  if (l) l.style.display = 'none';
-}, 12000);
+
 </script>
 
 </body>
