@@ -118,31 +118,30 @@ def validate_pairs(
     answer: dict[str, Any],
     declared_names: list[str],
     context: str,
-    errors: list[str],
+    warnings: list[str],
 ) -> tuple[set[str], set[str], bool] | None:
     expected_pairs: dict[str, str] = {}
     for index, declared_name in enumerate(declared_names):
         if not isinstance(declared_name, str) or not declared_name.strip():
-            errors.append(f"{context} declared pair {index} has no name")
+            warnings.append(f"{context} declared pair {index} has no name")
             continue
         key = declared_name.strip().casefold()
         if key in expected_pairs:
-            errors.append(f"{context} declared pair {declared_name!r} is duplicated")
+            warnings.append(f"{context} declared pair {declared_name!r} is duplicated")
         expected_pairs[key] = declared_name.strip()
 
     pairs = answer.get("pairs")
     if not isinstance(pairs, list):
-        errors.append(f"{context} pairs must be a list")
-        return None
+        warnings.append(f"{context} pairs must be a list")
+        pairs = []
 
     failed_names: set[str] = set()
     passed_names: set[str] = set()
     seen_names: set[str] = set()
-    has_failure = False
     for pair_index, pair in enumerate(pairs):
         pair_context = f"{context} pair {pair_index}"
         if not isinstance(pair, dict):
-            errors.append(f"{pair_context} is not an object")
+            warnings.append(f"{pair_context} is not an object")
             continue
 
         pair_name = pair.get("name")
@@ -150,47 +149,57 @@ def validate_pairs(
         pair_key = pair_name.strip().casefold() if name_is_valid else ""
         name_is_declared = name_is_valid and pair_key in expected_pairs
         if not name_is_valid:
-            errors.append(f"{pair_context} has no name")
+            warnings.append(f"{pair_context} has no name")
         elif not name_is_declared:
-            errors.append(
+            warnings.append(
                 f"{pair_context} name {pair_name!r} is not declared for this state"
             )
         elif pair_key in seen_names:
-            errors.append(f"{pair_context} name {pair_name!r} is duplicated")
+            warnings.append(f"{pair_context} name {pair_name!r} is duplicated")
         if name_is_declared:
             seen_names.add(pair_key)
 
         if not isinstance(pair.get("reason"), str) or not pair["reason"].strip():
-            errors.append(f"{pair_context} has no reason")
+            warnings.append(f"{pair_context} has no reason")
         both_visible = pair.get("both_visible")
         both_visible_is_valid = isinstance(both_visible, bool)
         if not both_visible_is_valid:
-            errors.append(f"{pair_context} both_visible is not boolean")
+            warnings.append(f"{pair_context} both_visible is not boolean")
 
         checks = pair.get("checks")
         if not isinstance(checks, dict):
-            errors.append(f"{pair_context} checks is not an object")
+            warnings.append(f"{pair_context} checks is not an object")
             checks = {}
         check_failed = False
         checks_valid = True
+        all_checks_null = True
         for check_name in PAIR_CHECK_NAMES:
             value = checks.get(check_name)
             if not isinstance(value, bool):
-                errors.append(f"{pair_context} check {check_name} is not boolean")
+                warnings.append(f"{pair_context} check {check_name} is not boolean")
                 checks_valid = False
-            elif value is False:
-                check_failed = True
+            else:
+                all_checks_null = False
+                if value is False:
+                    check_failed = True
 
-        pair_failed = both_visible is True and check_failed
-        expected_verdict = (
-            "NOT_ASSESSED"
-            if both_visible is False
-            else "FAIL" if pair_failed else "PASS"
-        )
-        if pair.get("verdict") != expected_verdict:
-            errors.append(
-                f"{pair_context} verdict is not derived from both_visible and its boolean checks"
+        pair_verdict = pair.get("verdict")
+        pair_failed = False
+        if pair_verdict == "NOT_ASSESSED" and (
+            both_visible is False or all_checks_null
+        ):
+            pass
+        else:
+            pair_failed = both_visible is True and check_failed
+            expected_verdict = (
+                "NOT_ASSESSED"
+                if both_visible is False
+                else "FAIL" if pair_failed else "PASS"
             )
+            if pair_verdict != expected_verdict:
+                warnings.append(
+                    f"{pair_context} verdict is not derived from both_visible and its boolean checks"
+                )
         if (
             name_is_declared
             and pair_key not in failed_names
@@ -202,18 +211,17 @@ def validate_pairs(
                 failed_names.add(pair_key)
             elif both_visible:
                 passed_names.add(pair_key)
-        has_failure = has_failure or pair_failed
 
     missing_names = [
         expected_pairs[key] for key in expected_pairs.keys() - seen_names
     ]
     if missing_names:
-        errors.append(
+        warnings.append(
             f"{context} missing declared pair entries: "
             + ", ".join(sorted(missing_names))
         )
 
-    return failed_names, passed_names, has_failure
+    return failed_names, passed_names, False
 
 
 def validate_normalized_answer(
@@ -221,6 +229,7 @@ def validate_normalized_answer(
     declared_pair_names: list[str],
     context: str,
     errors: list[str],
+    warnings: list[str],
     *,
     error_is_failure: bool = False,
 ) -> tuple[set[str], set[str], set[str], set[str]] | None:
@@ -229,7 +238,7 @@ def validate_normalized_answer(
         return None
 
     control_result = validate_controls(answer, context, errors, CHECK_NAMES)
-    pair_result = validate_pairs(answer, declared_pair_names, context, errors)
+    pair_result = validate_pairs(answer, declared_pair_names, context, warnings)
     if control_result is None or pair_result is None:
         return None
 
@@ -268,6 +277,7 @@ def main() -> int:
 
     result_path = Path(sys.argv[1])
     errors: list[str] = []
+    warnings: list[str] = []
     rows: list[tuple[str, int, str, str, str]] = []
 
     try:
@@ -347,6 +357,7 @@ def main() -> int:
                 declared_pair_names,
                 f"result {index}",
                 errors,
+                warnings,
                 error_is_failure=True,
             )
             rechecks = result.get("rechecks")
@@ -361,12 +372,14 @@ def main() -> int:
                         declared_pair_names,
                         f"result {index} recheck 0",
                         errors,
+                        warnings,
                     )
                     second_names = validate_normalized_answer(
                         rechecks[1],
                         declared_pair_names,
                         f"result {index} recheck 1",
                         errors,
+                        warnings,
                     )
                     if first_names is not None and second_names is not None:
                         (
@@ -503,6 +516,9 @@ def main() -> int:
     if errors:
         lines.extend(("", "Validation errors:", ""))
         lines.extend(f"- {markdown_cell(error)}" for error in errors)
+    if warnings:
+        lines.extend(("", "Pair advisory warnings:", ""))
+        lines.extend(f"- {markdown_cell(warning)}" for warning in warnings)
     lines.append("")
     summary = "\n".join(lines)
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")

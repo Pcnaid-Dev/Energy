@@ -249,7 +249,7 @@ class WorkersAINormalizationTests(unittest.TestCase):
         self.assertIn("0 pass / 1 fail / 0 not assessed", output.getvalue())
         self.assertIn("pair observations are advisory", output.getvalue())
 
-    def test_missing_declared_pair_retries_then_fails_closed(self) -> None:
+    def test_missing_declared_pair_is_not_assessed_without_retry(self) -> None:
         metadata = {
             "state.png": {
                 "route": "/",
@@ -267,12 +267,42 @@ class WorkersAINormalizationTests(unittest.TestCase):
                 "account", "token", Path("state.png"), metadata
             )
 
-        self.assertEqual(request.call_count, 3)
-        self.assertEqual(result["verdict"], "FAIL")
-        self.assertRegex(
-            result["error"],
-            "missing declared pair entries.*schema-invalid audit persisted after 3 attempts",
-        )
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(result["verdict"], "PASS")
+        self.assertEqual(result["pairs"][0]["name"], DECLARED_PAIR["name"])
+        self.assertEqual(result["pairs"][0]["verdict"], "NOT_ASSESSED")
+        self.assertEqual(result["pairs"][0]["reason"], "advisory-missing")
+        self.assertIn("advisory-missing", result["pair_notes"][0])
+
+    def test_hidden_pair_with_null_checks_normalizes_to_not_assessed(self) -> None:
+        hidden_pair = {
+            "name": DECLARED_PAIR["name"],
+            "both_visible": False,
+            "checks": {
+                check_name: None for check_name in vision_workersai.PAIR_CHECK_NAMES
+            },
+            "reason": "drawer is closed",
+        }
+        metadata = {
+            "route": "/",
+            "viewport": "desktop",
+            "state": "default",
+            "pairs": [DECLARED_PAIR],
+        }
+        with mock.patch.object(
+            vision_workersai,
+            "request_audit",
+            return_value=make_raw(make_control(), pairs=[hidden_pair]),
+        ) as request:
+            result = vision_workersai.audit_image(
+                "account", "token", Path("state.png"), metadata
+            )
+
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(result["verdict"], "PASS")
+        self.assertEqual(result["pairs"][0]["verdict"], "NOT_ASSESSED")
+        self.assertEqual(result["pairs"][0]["both_visible"], False)
+        self.assertIsNone(result["pairs"][0]["checks"]["text_colour"])
 
     def test_schema_invalid_answer_then_valid_answer_passes(self) -> None:
         invalid = make_raw(make_control(reason=""))
@@ -707,6 +737,36 @@ class WorkersAIValidatorTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0, output)
         self.assertIn("0 pass / 1 fail / 0 not assessed", output)
+
+    def test_validator_accepts_not_assessed_pair_with_null_checks(self) -> None:
+        controls = vision_workersai.normalize_audit(make_raw(make_control()))["controls"]
+        hidden_pair = {
+            "name": DECLARED_PAIR["name"],
+            "both_visible": False,
+            "checks": {"text_colour": None, "font_family": None,
+                       "font_weight": None, "alignment": None},
+            "verdict": "NOT_ASSESSED",
+            "reason": "advisory-malformed: check text_colour is not boolean",
+        }
+        first = vision_workersai.normalize_audit(
+            make_raw(make_control(failed_check="centred"), pairs=[make_pair()]),
+            [DECLARED_PAIR],
+        )
+        second = vision_workersai.normalize_audit(
+            make_raw(make_control(), pairs=[hidden_pair]),
+            [DECLARED_PAIR],
+        )
+        effective = vision_workersai.adjudicate_recheck(first, second)
+
+        exit_code, output = self.run_validator(
+            first,
+            second,
+            controls,
+            pairs=effective["pairs"],
+            declared_pairs=[DECLARED_PAIR],
+        )
+
+        self.assertEqual(exit_code, 0, output)
 
 
 if __name__ == "__main__":

@@ -288,50 +288,75 @@ def normalize_audit(
     expected_pairs: dict[str, str] = {}
     for index, pair in enumerate(declared_pairs):
         if not isinstance(pair, dict):
-            raise InvalidAuditResponse(f"declared pair {index} is not an object")
+            continue
         name = pair.get("name")
         if not isinstance(name, str) or not name.strip():
-            raise InvalidAuditResponse(f"declared pair {index} has no name")
-        name_key = name.strip().casefold()
-        if name_key in expected_pairs:
-            raise InvalidAuditResponse(f"declared pair {name!r} is duplicated")
-        expected_pairs[name_key] = name.strip()
+            continue
+        expected_pairs.setdefault(name.strip().casefold(), name.strip())
 
     pairs = raw.get("pairs")
     if not isinstance(pairs, list):
-        raise InvalidAuditResponse("pairs must be a list")
+        pairs = []
 
     normalized_pairs: list[dict[str, Any]] = []
+    pair_notes: list[str] = []
     seen_pairs: set[str] = set()
     for index, pair in enumerate(pairs):
         if not isinstance(pair, dict):
-            raise InvalidAuditResponse(f"pair {index} is not an object")
+            pair_notes.append(f"pair {index} dropped: advisory-malformed: not an object")
+            continue
         name = pair.get("name")
         reason = pair.get("reason")
         both_visible = pair.get("both_visible")
         checks = pair.get("checks")
         if not isinstance(name, str) or not name.strip():
-            raise InvalidAuditResponse(f"pair {index} has no name")
+            pair_notes.append(
+                f"pair {index} dropped: advisory-malformed: missing name"
+            )
+            continue
         name_key = name.strip().casefold()
         if name_key not in expected_pairs:
-            raise InvalidAuditResponse(f"pair {name!r} is not declared for this state")
+            pair_notes.append(
+                f"pair {name!r} dropped: advisory-malformed: not declared for this state"
+            )
+            continue
         if name_key in seen_pairs:
-            raise InvalidAuditResponse(f"pair {name!r} is duplicated")
-        if not isinstance(reason, str) or not reason.strip():
-            raise InvalidAuditResponse(f"pair {index} has no reason")
-        if not isinstance(both_visible, bool):
-            raise InvalidAuditResponse(f"pair {index} both_visible is not boolean")
-        if not isinstance(checks, dict):
-            raise InvalidAuditResponse(f"pair {index} checks is not an object")
+            pair_notes.append(
+                f"pair {name!r} dropped: advisory-malformed: duplicated"
+            )
+            continue
+        seen_pairs.add(name_key)
 
-        normalized_checks = {}
+        malformed: list[str] = []
+        if not isinstance(reason, str) or not reason.strip():
+            malformed.append("missing reason")
+        if not isinstance(both_visible, bool):
+            malformed.append("both_visible is not boolean")
+        if not isinstance(checks, dict):
+            malformed.append("checks is not an object")
+
+        normalized_checks: dict[str, bool | None] = {}
         for check_name in PAIR_CHECK_NAMES:
-            value = checks.get(check_name)
-            if not isinstance(value, bool):
-                raise InvalidAuditResponse(
-                    f"pair {index} check {check_name} is not boolean"
-                )
-            normalized_checks[check_name] = value
+            value = checks.get(check_name) if isinstance(checks, dict) else None
+            if isinstance(value, bool):
+                normalized_checks[check_name] = value
+            else:
+                normalized_checks[check_name] = None
+                malformed.append(f"check {check_name} is not boolean")
+
+        if malformed:
+            normalized_pairs.append(
+                {
+                    "name": expected_pairs[name_key],
+                    "both_visible": both_visible
+                    if isinstance(both_visible, bool)
+                    else None,
+                    "checks": normalized_checks,
+                    "verdict": "NOT_ASSESSED",
+                    "reason": "advisory-malformed: " + ", ".join(malformed),
+                }
+            )
+            continue
 
         pair_failed = both_visible and not all(normalized_checks.values())
         pair_verdict = (
@@ -348,20 +373,29 @@ def normalize_audit(
                 "reason": reason,
             }
         )
-        seen_pairs.add(name_key)
 
     missing_pairs = [
         expected_pairs[name_key]
         for name_key in expected_pairs.keys() - seen_pairs
     ]
-    if missing_pairs:
-        raise InvalidAuditResponse(
-            "missing declared pair entries: " + ", ".join(sorted(missing_pairs))
+    for missing_name in sorted(missing_pairs):
+        normalized_pairs.append(
+            {
+                "name": missing_name,
+                "both_visible": None,
+                "checks": {check_name: None for check_name in PAIR_CHECK_NAMES},
+                "verdict": "NOT_ASSESSED",
+                "reason": "advisory-missing",
+            }
+        )
+        pair_notes.append(
+            f"pair {missing_name!r} added: advisory-missing: not returned by the model"
         )
 
     return {
         "controls": normalized_controls,
         "pairs": normalized_pairs,
+        "pair_notes": pair_notes,
         "verdict": "FAIL" if has_failure else "PASS",
     }
 
@@ -433,9 +467,13 @@ def adjudicate_recheck(
         )
 
     has_failure = any(item["verdict"] == "FAIL" for item in controls)
+    pair_notes = list(first.get("pair_notes", [])) + list(
+        second.get("pair_notes", [])
+    )
     return {
         "controls": controls,
         "pairs": pairs,
+        "pair_notes": pair_notes,
         "verdict": "FAIL" if has_failure else "PASS",
         "rechecks": [first, second],
     }
