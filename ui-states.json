@@ -112,8 +112,9 @@
           },
           {
             "name": "widget-utility-open",
+            "scrollIntoView": "#widgetMount",
             "actions": [
-              {"action": "click", "selector": "#widgetMount .el-select", "waitFor": "#widgetMount .el-select.is-open"}
+              {"action": "click", "selector": "#widgetMount .el-select", "waitFor": "#widgetMount .el-select-dropdown"}
             ],
             "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
           }
@@ -140,8 +141,9 @@
           },
           {
             "name": "widget-utility-open",
+            "scrollIntoView": "#widgetMount",
             "actions": [
-              {"action": "click", "selector": "#widgetMount .el-select", "waitFor": "#widgetMount .el-select.is-open"}
+              {"action": "click", "selector": "#widgetMount .el-select", "waitFor": "#widgetMount .el-select-dropdown"}
             ],
             "pairs": [{"name": "drawer CTA vs header CTA", "controls": [{"name": "drawer CTA", "selector": ".mobile-menu .btn-primary"}, {"name": "header CTA", "selector": ".nav-cta .btn-primary"}]}]
           }

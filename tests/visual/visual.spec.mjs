@@ -160,7 +160,9 @@ async function performAction(page, action) {
   }
 
   if (action.waitFor) {
-    await page.locator(action.waitFor).waitFor({ state: 'visible' });
+    const waitTarget = page.locator(action.waitFor);
+    await waitTarget.waitFor({ state: 'visible' });
+    await expect(waitTarget).toBeVisible();
   }
 }
 
@@ -186,6 +188,14 @@ for (const [viewportName, viewport] of Object.entries(stateConfig.viewports)) {
           await page.evaluate(async () => {
             if (document.fonts) await document.fonts.ready;
           });
+
+          if (state.scrollIntoView) {
+            const scrollTarget = page.locator(state.scrollIntoView);
+            await scrollTarget.waitFor({ state: 'visible' });
+            await scrollTarget.evaluate((element) => {
+              element.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'center' });
+            });
+          }
 
           for (const action of state.actions) {
             await performAction(page, action);
