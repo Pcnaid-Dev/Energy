@@ -28,6 +28,8 @@ After the pixel comparison, three independent vision reviewers inspect every cap
 
 On pull requests, all four gates run: the pixel comparison (`visual`), Grok vision audit (`vision-grok`), Workers AI vision audit (`vision-workersai`), and Claude vision audit (`vision-claude`). All four are required to pass: either a failed per-control check, an audit request error, or a Claude MUST finding fails the workflow.
 
+The Workers AI reviewer accepts either an object or a JSON-bearing string in `result.response`. An empty response or an answer with no controls is requested up to two more times, then fails closed. Its control and image verdicts are derived from the five boolean checks rather than the model-written verdict fields. A check-based image failure is judged once more. Each first-answer failed control is cleared only when the second answer passes a control with the same case-insensitive name; an omitted, renamed, or same-name failed control leaves the first answer's failed control in the effective controls. Effective controls must be non-empty, otherwise the image fails with an explicit error. The two normalized answers are retained under `rechecks` in `vision-workersai.json`.
+
 On a push to `main`, `vision-claude` is skipped because `anthropics/claude-code-action@v1` does not support `push` events; `visual` (pixel diff), `vision-grok`, and `vision-workersai` run as push-time checks. Production deploys to Cloudflare Pages run only through this workflow on a push to `main` when `visual`, `vision-grok`, and `vision-workersai` succeed and `vision-claude` succeeds or is skipped.
 
 The workflow installs JavaScript dependencies with `npm ci`; a committed `package-lock.json` is therefore required.

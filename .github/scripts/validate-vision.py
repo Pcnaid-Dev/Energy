@@ -23,6 +23,65 @@ def markdown_cell(value: Any) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ")
 
 
+def validate_normalized_answer(
+    answer: Any, context: str, errors: list[str]
+) -> tuple[set[str], set[str]] | None:
+    if not isinstance(answer, dict):
+        errors.append(f"{context} is not an object")
+        return None
+    controls = answer.get("controls")
+    if not isinstance(controls, list) or not controls:
+        errors.append(f"{context} controls must be a non-empty list")
+        return None
+
+    failed_names: set[str] = set()
+    passed_names: set[str] = set()
+    has_failure = False
+    for control_index, control in enumerate(controls):
+        control_context = f"{context} control {control_index}"
+        if not isinstance(control, dict):
+            errors.append(f"{control_context} is not an object")
+            continue
+        name = control.get("name")
+        if not isinstance(name, str) or not name.strip():
+            errors.append(f"{control_context} has no name")
+        if not isinstance(control.get("reason"), str) or not control["reason"].strip():
+            errors.append(f"{control_context} has no reason")
+
+        checks = control.get("checks")
+        if not isinstance(checks, dict):
+            errors.append(f"{control_context} checks is not an object")
+            checks = {}
+        check_failed = False
+        checks_valid = True
+        for check_name in CHECK_NAMES:
+            value = checks.get(check_name)
+            if not isinstance(value, bool):
+                errors.append(f"{control_context} check {check_name} is not boolean")
+                checks_valid = False
+            elif value is False:
+                check_failed = True
+
+        expected_verdict = "FAIL" if check_failed else "PASS"
+        if control.get("verdict") != expected_verdict:
+            errors.append(
+                f"{control_context} verdict is not derived from its boolean checks"
+            )
+        if checks_valid:
+            name_is_valid = isinstance(name, str) and bool(name.strip())
+            if check_failed:
+                has_failure = True
+                if name_is_valid:
+                    failed_names.add(name.strip().casefold())
+            elif name_is_valid:
+                passed_names.add(name.strip().casefold())
+
+    expected_verdict = "FAIL" if has_failure else "PASS"
+    if answer.get("verdict") != expected_verdict:
+        errors.append(f"{context} verdict is not derived from its controls")
+    return failed_names, passed_names
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("usage: validate-vision.py <result.json>", file=sys.stderr)
@@ -56,6 +115,30 @@ def main() -> int:
         controls = result.get("controls")
         verdict = result.get("verdict")
         reason = "All reported controls passed."
+        rechecks = result.get("rechecks")
+
+        if rechecks is not None:
+            if not isinstance(rechecks, list) or len(rechecks) != 2:
+                errors.append(f"result {index} rechecks must contain exactly two answers")
+            else:
+                first_names = validate_normalized_answer(
+                    rechecks[0], f"result {index} recheck 0", errors
+                )
+                second_names = validate_normalized_answer(
+                    rechecks[1], f"result {index} recheck 1", errors
+                )
+                if first_names is not None and second_names is not None:
+                    first_failed, _ = first_names
+                    _, second_passed = second_names
+                    if not first_failed:
+                        errors.append(f"result {index} recheck 0 has no failed control")
+                    expected_verdict = (
+                        "FAIL" if first_failed - second_passed else "PASS"
+                    )
+                    if not result.get("error") and verdict != expected_verdict:
+                        errors.append(
+                            f"result {index} verdict does not match its recheck consensus"
+                        )
 
         if not isinstance(result.get("route"), str) or not result["route"].startswith("/"):
             errors.append(f"result {index} has an invalid route")

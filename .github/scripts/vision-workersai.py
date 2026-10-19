@@ -21,6 +21,7 @@ MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
 MAX_TOKENS = 4096
 MAX_WORKERS = 4
 MAX_RETRIES = 3
+MAX_EMPTY_RESPONSE_RETRIES = 2
 REQUEST_TIMEOUT_SECONDS = 300
 CHECK_NAMES = (
     "legible",
@@ -29,6 +30,10 @@ CHECK_NAMES = (
     "no_overflow",
     "no_raw_markdown",
 )
+
+
+class EmptyAuditResponse(ValueError):
+    """A model response that can be retried because it contains no controls."""
 
 
 def load_state_metadata(config_path: Path) -> dict[str, dict[str, Any]]:
@@ -86,6 +91,28 @@ def extract_first_json_object(content: str) -> dict[str, Any]:
         if isinstance(value, dict):
             return value
     raise ValueError("model result.response does not contain a JSON object")
+
+
+def parse_result_response(result: dict[str, Any]) -> dict[str, Any]:
+    content = result.get("response")
+    result_keys = sorted(str(key) for key in result)
+    if isinstance(content, dict):
+        return content
+    if isinstance(content, str):
+        if content.strip():
+            return extract_first_json_object(content)
+        raise EmptyAuditResponse(
+            "Workers AI result.response is empty "
+            f"(type=str; result top-level keys={result_keys})"
+        )
+
+    message = (
+        "Workers AI result.response has unsupported "
+        f"type={type(content).__name__}; result top-level keys={result_keys}"
+    )
+    if content is None:
+        raise EmptyAuditResponse(message)
+    raise ValueError(message)
 
 
 def retry_delay(retry: int, retry_after: str | None = None) -> float:
@@ -151,11 +178,11 @@ def request_audit(
                 )
             result = response_body.get("result")
             if not isinstance(result, dict):
-                raise ValueError("Workers AI response result is not an object")
-            content = result.get("response")
-            if not isinstance(content, str) or not content.strip():
-                raise ValueError("Workers AI result.response is empty or not a string")
-            return extract_first_json_object(content)
+                raise ValueError(
+                    "Workers AI response result has "
+                    f"type={type(result).__name__}; top-level keys unavailable"
+                )
+            return parse_result_response(result)
         except HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")[:1000]
             retryable = error.code == 429 or 500 <= error.code < 600
@@ -192,7 +219,7 @@ def normalize_audit(raw: Any) -> dict[str, Any]:
         raise ValueError("response is not an object")
     controls = raw.get("controls")
     if not isinstance(controls, list) or not controls:
-        raise ValueError("controls must be a non-empty list")
+        raise EmptyAuditResponse("controls must be a non-empty list")
 
     normalized_controls = []
     has_failure = False
@@ -202,15 +229,12 @@ def normalize_audit(raw: Any) -> dict[str, Any]:
         name = control.get("name")
         reason = control.get("reason")
         checks = control.get("checks")
-        verdict = control.get("verdict")
         if not isinstance(name, str) or not name.strip():
             raise ValueError(f"control {index} has no name")
         if not isinstance(reason, str) or not reason.strip():
             raise ValueError(f"control {index} has no reason")
         if not isinstance(checks, dict):
             raise ValueError(f"control {index} checks is not an object")
-        if verdict not in ("PASS", "FAIL"):
-            raise ValueError(f"control {index} verdict is invalid")
 
         normalized_checks = {}
         for check_name in CHECK_NAMES:
@@ -219,7 +243,7 @@ def normalize_audit(raw: Any) -> dict[str, Any]:
                 raise ValueError(f"control {index} check {check_name} is not boolean")
             normalized_checks[check_name] = value
 
-        control_failed = verdict == "FAIL" or not all(normalized_checks.values())
+        control_failed = not all(normalized_checks.values())
         has_failure = has_failure or control_failed
         normalized_controls.append(
             {
@@ -230,12 +254,76 @@ def normalize_audit(raw: Any) -> dict[str, Any]:
             }
         )
 
-    if raw.get("verdict") not in ("PASS", "FAIL"):
-        raise ValueError("image verdict is invalid")
-    has_failure = has_failure or raw["verdict"] == "FAIL"
     return {
         "controls": normalized_controls,
         "verdict": "FAIL" if has_failure else "PASS",
+    }
+
+
+def request_normalized_audit(
+    account_id: str,
+    api_token: str,
+    image_path: Path,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    attempts = MAX_EMPTY_RESPONSE_RETRIES + 1
+    for attempt in range(attempts):
+        try:
+            return normalize_audit(
+                request_audit(account_id, api_token, image_path, metadata)
+            )
+        except EmptyAuditResponse as error:
+            if attempt == attempts - 1:
+                raise EmptyAuditResponse(
+                    f"{error}; empty audit persisted after {attempts} attempts"
+                ) from error
+    raise RuntimeError("empty audit retry loop ended unexpectedly")
+
+
+def control_name_key(control: dict[str, Any]) -> str:
+    return control["name"].strip().casefold()
+
+
+def adjudicate_recheck(
+    first: dict[str, Any], second: dict[str, Any]
+) -> dict[str, Any]:
+    first_failed_names = {
+        control_name_key(control)
+        for control in first["controls"]
+        if control["verdict"] == "FAIL"
+    }
+    second_passes = {
+        control_name_key(control): control
+        for control in second["controls"]
+        if control["verdict"] == "PASS"
+    }
+
+    controls: list[dict[str, Any]] = []
+    included_names: set[str] = set()
+    for control in first["controls"]:
+        name_key = control_name_key(control)
+        if control["verdict"] == "FAIL" and name_key in second_passes:
+            controls.append(second_passes[name_key])
+        else:
+            controls.append(control)
+        included_names.add(name_key)
+
+    for control in second["controls"]:
+        name_key = control_name_key(control)
+        if control["verdict"] == "PASS" and name_key not in included_names:
+            controls.append(control)
+            included_names.add(name_key)
+
+    if not controls:
+        raise ValueError(
+            "Recheck adjudication produced no effective controls; image fails closed."
+        )
+
+    unresolved_failures = first_failed_names - second_passes.keys()
+    return {
+        "controls": controls,
+        "verdict": "FAIL" if unresolved_failures else "PASS",
+        "rechecks": [first, second],
     }
 
 
@@ -260,9 +348,14 @@ def audit_image(
         ]
         if missing_variables:
             raise RuntimeError(f"{', '.join(missing_variables)} required")
-        normalized = normalize_audit(
-            request_audit(account_id, api_token, image_path, metadata)
+        normalized = request_normalized_audit(
+            account_id, api_token, image_path, metadata
         )
+        if normalized["verdict"] == "FAIL":
+            recheck = request_normalized_audit(
+                account_id, api_token, image_path, metadata
+            )
+            normalized = adjudicate_recheck(normalized, recheck)
         result = {"image": image_path.name, **metadata, **normalized}
         if image_path.name not in metadata_by_image:
             result["verdict"] = "FAIL"
